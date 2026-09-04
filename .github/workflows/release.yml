@@ -1,0 +1,57 @@
+name: Release SDJFAM Chat
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Create YouTube OAuth resource
+        shell: powershell
+        env:
+          YOUTUBE_OAUTH_JSON: ${{ secrets.YOUTUBE_OAUTH_JSON }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:YOUTUBE_OAUTH_JSON)) {
+            throw "GitHub secret YOUTUBE_OAUTH_JSON ontbreekt."
+          }
+
+          Set-Content `
+            -Path "youtube-oauth.json" `
+            -Value $env:YOUTUBE_OAUTH_JSON `
+            -Encoding UTF8
+
+      - name: Build and publish Tauri release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "SDJFAM Chat v__VERSION__"
+          releaseBody: "Nieuwe versie van SDJFAM Chat."
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
