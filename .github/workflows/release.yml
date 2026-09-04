@@ -37,10 +37,11 @@ jobs:
             throw "GitHub secret YOUTUBE_OAUTH_JSON ontbreekt."
           }
 
-          Set-Content `
-            -Path "youtube-oauth.json" `
-            -Value $env:YOUTUBE_OAUTH_JSON `
-            -Encoding UTF8
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "youtube-oauth.json"),
+            $env:YOUTUBE_OAUTH_JSON,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
 
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v0
