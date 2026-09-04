@@ -2,6 +2,11 @@ pub mod youtube_api {
     tonic::include_proto!("youtube.api.v3");
 }
 
+mod event_engine;
+
+use event_engine::{EventType, Platform, SdjfamEvent};
+
+
 use chrono::{DateTime, Duration, Utc};
 use oauth2::basic::BasicClient;
 use oauth2::reqwest;
@@ -3012,6 +3017,36 @@ async fn twitch_viewer_count(
 }
 
 
+
+// =========================================================
+// SDJFAM EVENT ENGINE TEST
+// =========================================================
+
+#[tauri::command]
+fn event_engine_test() -> SdjfamEvent {
+    SdjfamEvent::new(
+        format!(
+            "sdjfam-test-{}",
+            Utc::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_default()
+        ),
+        Platform::System,
+        EventType::Custom,
+    )
+    .with_message(
+        "SDJFAM Event Engine werkt",
+    )
+    .with_raw_event_type(
+        "event_engine_test",
+    )
+    .with_metadata(
+        serde_json::json!({
+            "engine": "sdjfam",
+            "status": "ok"
+        }),
+    )
+}
 #[cfg_attr(
     mobile,
     tauri::mobile_entry_point
@@ -3027,7 +3062,8 @@ pub fn run() {
         )
         .invoke_handler(
             tauri::generate_handler![
-                youtube_login,
+                
+                event_engine_test,youtube_login,
                 youtube_auth_status,
                 youtube_auto_connect,
                 youtube_start_chat_stream,
