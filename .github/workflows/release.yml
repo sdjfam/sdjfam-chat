@@ -43,12 +43,22 @@ jobs:
             (New-Object System.Text.UTF8Encoding($false))
           )
 
+      - name: Check Twitch Client ID
+        shell: powershell
+        env:
+          VITE_TWITCH_CLIENT_ID: ${{ secrets.VITE_TWITCH_CLIENT_ID }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VITE_TWITCH_CLIENT_ID)) {
+            throw "GitHub secret VITE_TWITCH_CLIENT_ID ontbreekt."
+          }
+
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VITE_TWITCH_CLIENT_ID: ${{ secrets.VITE_TWITCH_CLIENT_ID }}
         with:
           tagName: v__VERSION__
           releaseName: "SDJFAM Chat v__VERSION__"
