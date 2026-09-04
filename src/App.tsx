@@ -4,6 +4,7 @@ import {
   listen,
   type UnlistenFn,
 } from "@tauri-apps/api/event";
+import { check } from "@tauri-apps/plugin-updater";
 import tmi from "tmi.js";
 import "./App.css";
 
@@ -120,8 +121,7 @@ function App() {
   const [
     twitchConnected,
     setTwitchConnected,
-  ] =
-    useState(false);
+  ] = useState(false);
 
   // -------------------------------------------------------
   // YOUTUBE STATE
@@ -130,34 +130,29 @@ function App() {
   const [
     youtubeConnected,
     setYoutubeConnected,
-  ] =
-    useState(false);
+  ] = useState(false);
 
   const [
     youtubeStatus,
     setYoutubeStatus,
-  ] =
-    useState(
-      "YouTube nog niet gekoppeld"
-    );
+  ] = useState(
+    "YouTube nog niet gekoppeld"
+  );
 
   const [
     youtubeLiveChatId,
     setYoutubeLiveChatId,
-  ] =
-    useState<string | null>(null);
+  ] = useState<string | null>(null);
 
   const [
     youtubeVideoId,
     setYoutubeVideoId,
-  ] =
-    useState<string | null>(null);
+  ] = useState<string | null>(null);
 
   const [
     youtubeTitle,
     setYoutubeTitle,
-  ] =
-    useState<string | null>(null);
+  ] = useState<string | null>(null);
 
   // -------------------------------------------------------
   // OAUTH / AUTO-CONNECT STATE
@@ -166,28 +161,48 @@ function App() {
   const [
     oauthLoading,
     setOauthLoading,
-  ] =
-    useState(false);
+  ] = useState(false);
 
   const [
     autoConnectLoading,
     setAutoConnectLoading,
-  ] =
-    useState(true);
+  ] = useState(true);
 
   const [
     oauthStatus,
     setOauthStatus,
-  ] =
-    useState("");
+  ] = useState("");
 
   const [
     authStatus,
     setAuthStatus,
-  ] =
-    useState<YouTubeAuthStatus | null>(
-      null
-    );
+  ] = useState<YouTubeAuthStatus | null>(
+    null
+  );
+
+  // -------------------------------------------------------
+  // UPDATER STATE
+  // -------------------------------------------------------
+
+  const [
+    updateVersion,
+    setUpdateVersion,
+  ] = useState<string | null>(null);
+
+  const [
+    updateInstalling,
+    setUpdateInstalling,
+  ] = useState(false);
+
+  const [
+    updateStatus,
+    setUpdateStatus,
+  ] = useState("");
+
+  const updateRef =
+    useRef<
+      Awaited<ReturnType<typeof check>>
+    >(null);
 
   // -------------------------------------------------------
   // REFERENCES
@@ -202,6 +217,151 @@ function App() {
     useRef<Set<string>>(
       new Set()
     );
+
+  // =========================================================
+  // AUTOMATISCHE UPDATECONTROLE
+  // =========================================================
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkForUpdates() {
+      try {
+        const update =
+          await check({
+            timeout: 30000,
+          });
+
+        if (cancelled) {
+          if (update) {
+            await update.close().catch(
+              () => {}
+            );
+          }
+
+          return;
+        }
+
+        if (!update) {
+          updateRef.current = null;
+          setUpdateVersion(null);
+          setUpdateStatus("");
+          return;
+        }
+
+        updateRef.current = update;
+
+        setUpdateVersion(
+          update.version
+        );
+
+        setUpdateStatus(
+          `Versie ${update.version} is beschikbaar`
+        );
+      } catch (error) {
+        // De eerste release heeft mogelijk nog geen latest.json.
+        // Daarom tonen we bij een mislukte automatische controle
+        // geen storende foutmelding aan de gebruiker.
+        console.warn(
+          "Updatecontrole niet beschikbaar:",
+          error
+        );
+      }
+    }
+
+    void checkForUpdates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleInstallUpdate() {
+    const update =
+      updateRef.current;
+
+    if (
+      !update ||
+      updateInstalling
+    ) {
+      return;
+    }
+
+    try {
+      setUpdateInstalling(true);
+
+      setUpdateStatus(
+        `Update ${update.version} downloaden...`
+      );
+
+      let downloaded = 0;
+      let contentLength:
+        number | undefined;
+
+      await update.downloadAndInstall(
+        (event) => {
+          switch (event.event) {
+            case "Started":
+              contentLength =
+                event.data.contentLength;
+
+              setUpdateStatus(
+                `Update ${update.version} downloaden...`
+              );
+              break;
+
+            case "Progress":
+              downloaded +=
+                event.data.chunkLength;
+
+              if (
+                contentLength &&
+                contentLength > 0
+              ) {
+                const percentage =
+                  Math.min(
+                    100,
+                    Math.round(
+                      (
+                        downloaded /
+                        contentLength
+                      ) * 100
+                    )
+                  );
+
+                setUpdateStatus(
+                  `Update ${update.version} downloaden... ${percentage}%`
+                );
+              }
+              break;
+
+            case "Finished":
+              setUpdateStatus(
+                "Update gedownload. Installeren..."
+              );
+              break;
+          }
+        }
+      );
+
+      // Op Windows sluit Tauri de app automatisch
+      // wanneer de updater-installer wordt gestart.
+      setUpdateStatus(
+        "Update wordt geïnstalleerd..."
+      );
+    } catch (error) {
+      console.error(
+        "Update installeren mislukt:",
+        error
+      );
+
+      setUpdateStatus(
+        `Update mislukt: ${String(error)}`
+      );
+
+      setUpdateInstalling(false);
+    }
+  }
 
   // =========================================================
   // GOOGLE KOPPELING STATUS / 7-DAGEN TIMER
@@ -226,11 +386,11 @@ function App() {
   }
 
   useEffect(() => {
-    refreshAuthStatus();
+    void refreshAuthStatus();
 
     const timer =
       window.setInterval(() => {
-        refreshAuthStatus();
+        void refreshAuthStatus();
       }, 60000);
 
     return () => {
@@ -280,39 +440,22 @@ function App() {
           return;
         }
 
-if (!result.discovery_available) {
-  setYoutubeConnected(false);
-  setYoutubeLiveChatId(null);
-  setYoutubeVideoId(null);
-  setYoutubeTitle(null);
+        if (!result.discovery_available) {
+          setYoutubeConnected(false);
+          setYoutubeLiveChatId(null);
+          setYoutubeVideoId(null);
+          setYoutubeTitle(null);
 
-  setYoutubeStatus(
-    "YouTube livestream-detectie tijdelijk niet beschikbaar"
-  );
+          setYoutubeStatus(
+            "YouTube livestream-detectie tijdelijk niet beschikbaar"
+          );
 
-  setOauthStatus(
-    result.message
-  );
+          setOauthStatus(
+            result.message
+          );
 
-  return;
-}
-
-if (!result.live) {
-  setYoutubeConnected(false);
-  setYoutubeLiveChatId(null);
-  setYoutubeVideoId(null);
-  setYoutubeTitle(null);
-
-  setYoutubeStatus(
-    "Geen actieve YouTube livestream"
-  );
-
-  setOauthStatus(
-    result.message
-  );
-
-  return;
-}
+          return;
+        }
 
         if (!result.live) {
           setYoutubeConnected(false);
@@ -322,14 +465,14 @@ if (!result.live) {
 
           setYoutubeStatus(
             "Geen actieve YouTube livestream"
-        );
+          );
 
-        setOauthStatus(
-          result.message
-        );
+          setOauthStatus(
+            result.message
+          );
 
-           return;
-         }
+          return;
+        }
 
         if (!result.live_chat_id) {
           setYoutubeConnected(false);
@@ -415,7 +558,7 @@ if (!result.live) {
       }
     }
 
-    autoConnectYouTube();
+    void autoConnectYouTube();
 
     return () => {
       cancelled = true;
@@ -567,7 +710,8 @@ if (!result.live) {
                   ...current,
                   {
                     id: chat.id,
-                    platform: "youtube",
+                    platform:
+                      "youtube",
                     username:
                       chat.author ||
                       "Unknown",
@@ -765,7 +909,7 @@ if (!result.live) {
       }
     }
 
-    startYouTubeGrpcChat(
+    void startYouTubeGrpcChat(
       youtubeLiveChatId
     );
 
@@ -941,9 +1085,66 @@ if (!result.live) {
           >
             {googleLinkText}
           </p>
+
+          {updateStatus && (
+            <p
+              style={{
+                marginTop: "5px",
+                fontSize: "11px",
+                color: updateVersion
+                  ? "#c6b5ff"
+                  : "#8f96a6",
+              }}
+            >
+              {updateStatus}
+            </p>
+          )}
         </div>
 
         <div className="status-row">
+          {updateVersion && (
+            <button
+              type="button"
+              onClick={
+                handleInstallUpdate
+              }
+              disabled={
+                updateInstalling
+              }
+              style={{
+                padding:
+                  "7px 11px",
+
+                border:
+                  "1px solid rgba(145, 100, 255, 0.65)",
+
+                borderRadius:
+                  "8px",
+
+                background:
+                  "rgba(125, 80, 255, 0.15)",
+
+                color:
+                  "#c6b5ff",
+
+                fontSize:
+                  "12px",
+
+                fontWeight:
+                  700,
+
+                cursor:
+                  updateInstalling
+                    ? "default"
+                    : "pointer",
+              }}
+            >
+              {updateInstalling
+                ? "Update installeren..."
+                : `Update ${updateVersion}`}
+            </button>
+          )}
+
           <button
             type="button"
             onClick={
