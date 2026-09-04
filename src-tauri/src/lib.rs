@@ -1919,6 +1919,1099 @@ async fn youtube_login(
 // TAURI START
 // =========================================================
 
+
+// =========================================================
+
+// =========================================================
+// SDJFAM V0.1.2 YOUTUBE VIEWERS
+// =========================================================
+
+const YOUTUBE_VIDEOS_URL: &str =
+    "https://www.googleapis.com/youtube/v3/videos";
+
+#[derive(Debug, Serialize)]
+struct YouTubeViewerResult {
+    connected: bool,
+    live: bool,
+    viewer_count: Option<u64>,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct YouTubeVideosResponse {
+    items: Option<Vec<YouTubeVideo>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YouTubeVideo {
+    #[serde(rename = "liveStreamingDetails")]
+    live_streaming_details: Option<YouTubeLiveStreamingDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YouTubeLiveStreamingDetails {
+    #[serde(rename = "concurrentViewers")]
+    concurrent_viewers: Option<String>,
+
+    #[serde(rename = "actualEndTime")]
+    actual_end_time: Option<String>,
+}
+
+async fn fetch_youtube_viewer_count(
+    http_client: &reqwest::Client,
+    access_token: &str,
+    video_id: &str,
+) -> Result<YouTubeViewerResult, String> {
+    let response =
+        http_client
+            .get(YOUTUBE_VIDEOS_URL)
+            .query(&[
+                (
+                    "part",
+                    "liveStreamingDetails",
+                ),
+                (
+                    "id",
+                    video_id,
+                ),
+            ])
+            .bearer_auth(
+                access_token,
+            )
+            .send()
+            .await
+            .map_err(|e| {
+                format!(
+                    "YouTube viewer-opvraag mislukt: {e}"
+                )
+            })?;
+
+    let status =
+        response.status();
+
+    let body =
+        response
+            .text()
+            .await
+            .map_err(|e| {
+                format!(
+                    "YouTube viewer-resultaat kon niet worden gelezen: {e}"
+                )
+            })?;
+
+    if !status.is_success() {
+        return Err(
+            format!(
+                "YouTube videos API fout {}: {}",
+                status,
+                body
+            ),
+        );
+    }
+
+    let videos =
+        serde_json::from_str::<YouTubeVideosResponse>(
+            &body,
+        )
+        .map_err(|e| {
+            format!(
+                "YouTube videos-JSON is ongeldig: {e}"
+            )
+        })?;
+
+    let video =
+        match videos
+            .items
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+        {
+            Some(video) => video,
+
+            None => {
+                return Ok(
+                    YouTubeViewerResult {
+                        connected: true,
+                        live: false,
+                        viewer_count: None,
+                        message:
+                            "YouTube livestream niet gevonden"
+                                .to_string(),
+                    },
+                );
+            }
+        };
+
+    let details =
+        match video.live_streaming_details {
+            Some(details) => details,
+
+            None => {
+                return Ok(
+                    YouTubeViewerResult {
+                        connected: true,
+                        live: false,
+                        viewer_count: None,
+                        message:
+                            "YouTube video heeft geen live streaming gegevens"
+                                .to_string(),
+                    },
+                );
+            }
+        };
+
+    if details.actual_end_time.is_some() {
+        return Ok(
+            YouTubeViewerResult {
+                connected: true,
+                live: false,
+                viewer_count: None,
+                message:
+                    "YouTube livestream is afgelopen"
+                        .to_string(),
+            },
+        );
+    }
+
+    let viewer_count =
+        details
+            .concurrent_viewers
+            .as_deref()
+            .and_then(|value| {
+                value.parse::<u64>().ok()
+            });
+
+    Ok(
+        YouTubeViewerResult {
+            connected: true,
+            live: true,
+            viewer_count,
+            message:
+                if viewer_count.is_some() {
+                    "YouTube livestream is live"
+                        .to_string()
+                } else {
+                    "YouTube livestream is live, maar het kijkersaantal is niet beschikbaar"
+                        .to_string()
+                },
+        },
+    )
+}
+
+// =========================================================
+// TAURI COMMAND: YOUTUBE VIEWER COUNT
+// =========================================================
+
+#[tauri::command]
+async fn youtube_viewer_count(
+    app: tauri::AppHandle,
+    video_id: String,
+) -> Result<YouTubeViewerResult, String> {
+    let video_id =
+        video_id
+            .trim()
+            .to_string();
+
+    if video_id.is_empty() {
+        return Ok(
+            YouTubeViewerResult {
+                connected: false,
+                live: false,
+                viewer_count: None,
+                message:
+                    "Er is geen actieve YouTube livestream"
+                        .to_string(),
+            },
+        );
+    }
+
+    let stored_token =
+        match load_stored_token()? {
+            Some(token) => token,
+
+            None => {
+                return Ok(
+                    YouTubeViewerResult {
+                        connected: false,
+                        live: false,
+                        viewer_count: None,
+                        message:
+                            "YouTube is nog niet gekoppeld"
+                                .to_string(),
+                    },
+                );
+            }
+        };
+
+    let oauth_file =
+        load_oauth_config(&app)?;
+
+    let client =
+        create_oauth_client(
+            oauth_file,
+            "http://127.0.0.1"
+                .to_string(),
+        )?;
+
+    let http_client =
+        create_http_client()?;
+
+    let access_token =
+        refresh_access_token(
+            &client,
+            &stored_token.refresh_token,
+            &http_client,
+        )
+        .await?;
+
+    fetch_youtube_viewer_count(
+        &http_client,
+        &access_token,
+        &video_id,
+    )
+    .await
+}
+
+
+// // SDJFAM V0.1.2 TWITCH VIEWERS
+// =========================================================
+
+const TWITCH_DEVICE_URL: &str =
+    "https://id.twitch.tv/oauth2/device";
+
+const TWITCH_TOKEN_URL: &str =
+    "https://id.twitch.tv/oauth2/token";
+
+const TWITCH_STREAMS_URL: &str =
+    "https://api.twitch.tv/helix/streams";
+
+const TWITCH_PUBLIC_REFRESH_TOKEN_DAYS: i64 = 30;
+const TWITCH_RELINK_WARNING_HOURS: i64 = 24;
+
+// =========================================================
+// TWITCH TOKEN OPSLAG
+// =========================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StoredTwitchToken {
+    access_token: String,
+    refresh_token: String,
+    linked_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct TwitchAuthStatus {
+    connected: bool,
+    linked_at: Option<String>,
+    expected_expiry_at: Option<String>,
+    seconds_remaining: i64,
+    needs_relogin: bool,
+    expired: bool,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TwitchLoginResult {
+    connected: bool,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TwitchViewerResult {
+    connected: bool,
+    live: bool,
+    viewer_count: Option<u64>,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TwitchDeviceResponse {
+    device_code: String,
+    expires_in: u64,
+    interval: u64,
+    user_code: String,
+    verification_uri: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TwitchTokenResponse {
+    access_token: String,
+    refresh_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TwitchStreamsResponse {
+    data: Vec<TwitchStream>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TwitchStream {
+    viewer_count: u64,
+}
+
+fn get_twitch_token_storage_path() -> Result<PathBuf, String> {
+    let local_app_data =
+        std::env::var("LOCALAPPDATA").map_err(|_| {
+            "Windows LOCALAPPDATA kon niet worden gevonden"
+                .to_string()
+        })?;
+
+    let app_dir =
+        Path::new(&local_app_data)
+            .join("SDJFAM Chat");
+
+    fs::create_dir_all(&app_dir).map_err(|e| {
+        format!(
+            "SDJFAM Chat opslagmap kon niet worden gemaakt: {e}"
+        )
+    })?;
+
+    Ok(app_dir.join("twitch-token.json"))
+}
+
+fn save_twitch_token(
+    access_token: &str,
+    refresh_token: &str,
+) -> Result<(), String> {
+    if access_token.trim().is_empty() {
+        return Err(
+            "Twitch access token is leeg".to_string(),
+        );
+    }
+
+    if refresh_token.trim().is_empty() {
+        return Err(
+            "Twitch refresh token is leeg".to_string(),
+        );
+    }
+
+    let token_path =
+        get_twitch_token_storage_path()?;
+
+    let stored_token =
+        StoredTwitchToken {
+            access_token:
+                access_token.to_string(),
+            refresh_token:
+                refresh_token.to_string(),
+            linked_at:
+                Utc::now(),
+        };
+
+    let json =
+        serde_json::to_string_pretty(
+            &stored_token,
+        )
+        .map_err(|e| {
+            format!(
+                "Twitch token kon niet worden voorbereid: {e}"
+            )
+        })?;
+
+    fs::write(
+        token_path,
+        json,
+    )
+    .map_err(|e| {
+        format!(
+            "Twitch token kon niet lokaal worden opgeslagen: {e}"
+        )
+    })?;
+
+    Ok(())
+}
+
+fn load_stored_twitch_token()
+    -> Result<Option<StoredTwitchToken>, String>
+{
+    let token_path =
+        get_twitch_token_storage_path()?;
+
+    if !token_path.exists() {
+        return Ok(None);
+    }
+
+    let contents =
+        fs::read_to_string(
+            token_path,
+        )
+        .map_err(|e| {
+            format!(
+                "Opgeslagen Twitch-koppeling kon niet worden gelezen: {e}"
+            )
+        })?;
+
+    let stored_token =
+        serde_json::from_str::<StoredTwitchToken>(
+            &contents,
+        )
+        .map_err(|e| {
+            format!(
+                "Opgeslagen Twitch-koppeling is ongeldig: {e}"
+            )
+        })?;
+
+    if stored_token
+        .access_token
+        .trim()
+        .is_empty()
+    {
+        return Err(
+            "Opgeslagen Twitch access token is leeg"
+                .to_string(),
+        );
+    }
+
+    if stored_token
+        .refresh_token
+        .trim()
+        .is_empty()
+    {
+        return Err(
+            "Opgeslagen Twitch refresh token is leeg"
+                .to_string(),
+        );
+    }
+
+    Ok(Some(stored_token))
+}
+
+fn create_twitch_auth_status()
+    -> Result<TwitchAuthStatus, String>
+{
+    let stored_token =
+        match load_stored_twitch_token()? {
+            Some(token) => token,
+
+            None => {
+                return Ok(
+                    TwitchAuthStatus {
+                        connected: false,
+                        linked_at: None,
+                        expected_expiry_at: None,
+                        seconds_remaining: 0,
+                        needs_relogin: false,
+                        expired: false,
+                        message:
+                            "Twitch API is nog niet gekoppeld"
+                                .to_string(),
+                    },
+                );
+            }
+        };
+
+    let expected_expiry =
+        stored_token.linked_at
+            + Duration::days(
+                TWITCH_PUBLIC_REFRESH_TOKEN_DAYS,
+            );
+
+    let remaining =
+        expected_expiry
+            .signed_duration_since(
+                Utc::now(),
+            )
+            .num_seconds();
+
+    let expired =
+        remaining <= 0;
+
+    let warning_seconds =
+        Duration::hours(
+            TWITCH_RELINK_WARNING_HOURS,
+        )
+        .num_seconds();
+
+    let needs_relogin =
+        remaining <= warning_seconds;
+
+    let message =
+        if expired {
+            "Twitch-koppeling opnieuw uitvoeren"
+                .to_string()
+        } else if needs_relogin {
+            "Twitch-koppeling verloopt binnenkort"
+                .to_string()
+        } else {
+            "Twitch API-koppeling actief"
+                .to_string()
+        };
+
+    Ok(
+        TwitchAuthStatus {
+            connected: !expired,
+            linked_at: Some(
+                stored_token
+                    .linked_at
+                    .to_rfc3339(),
+            ),
+            expected_expiry_at: Some(
+                expected_expiry
+                    .to_rfc3339(),
+            ),
+            seconds_remaining:
+                remaining.max(0),
+            needs_relogin,
+            expired,
+            message,
+        },
+    )
+}
+
+// =========================================================
+// TWITCH DEVICE LOGIN
+// =========================================================
+
+async fn request_twitch_device_code(
+    http_client: &reqwest::Client,
+    client_id: &str,
+) -> Result<TwitchDeviceResponse, String> {
+    let response =
+        http_client
+            .post(TWITCH_DEVICE_URL)
+            .form(&[
+                ("client_id", client_id),
+                ("scopes", ""),
+            ])
+            .send()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Twitch device-login kon niet starten: {e}"
+                )
+            })?;
+
+    let status =
+        response.status();
+
+    let body =
+        response
+            .text()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Twitch device-login antwoord kon niet worden gelezen: {e}"
+                )
+            })?;
+
+    if !status.is_success() {
+        return Err(
+            format!(
+                "Twitch device-login fout {}: {}",
+                status,
+                body
+            ),
+        );
+    }
+
+    serde_json::from_str::<TwitchDeviceResponse>(
+        &body,
+    )
+    .map_err(|e| {
+        format!(
+            "Twitch device-login JSON is ongeldig: {e}"
+        )
+    })
+}
+
+async fn poll_twitch_device_token(
+    http_client: &reqwest::Client,
+    client_id: &str,
+    device: &TwitchDeviceResponse,
+) -> Result<TwitchTokenResponse, String> {
+    let started_at =
+        std::time::Instant::now();
+
+    let expires_after =
+        std::time::Duration::from_secs(
+            device.expires_in,
+        );
+
+    let poll_interval =
+        device.interval.max(1);
+
+    loop {
+        if started_at.elapsed() >= expires_after {
+            return Err(
+                "Twitch login is verlopen. Probeer opnieuw."
+                    .to_string(),
+            );
+        }
+
+        let response =
+            http_client
+                .post(TWITCH_TOKEN_URL)
+                .form(&[
+                    ("client_id", client_id),
+                    (
+                        "scopes",
+                        "",
+                    ),
+                    (
+                        "device_code",
+                        device.device_code.as_str(),
+                    ),
+                    (
+                        "grant_type",
+                        "urn:ietf:params:oauth:grant-type:device_code",
+                    ),
+                ])
+                .send()
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Twitch token-opvraag mislukt: {e}"
+                    )
+                })?;
+
+        let status =
+            response.status();
+
+        let body =
+            response
+                .text()
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Twitch token-antwoord kon niet worden gelezen: {e}"
+                    )
+                })?;
+
+        if status.is_success() {
+            let token =
+                serde_json::from_str::<TwitchTokenResponse>(
+                    &body,
+                )
+                .map_err(|e| {
+                    format!(
+                        "Twitch token-JSON is ongeldig: {e}"
+                    )
+                })?;
+
+            if token.access_token.trim().is_empty() {
+                return Err(
+                    "Twitch gaf geen access token terug"
+                        .to_string(),
+                );
+            }
+
+            if token.refresh_token.trim().is_empty() {
+                return Err(
+                    "Twitch gaf geen refresh token terug"
+                        .to_string(),
+                );
+            }
+
+            return Ok(token);
+        }
+
+        let pending =
+            serde_json::from_str::<serde_json::Value>(
+                &body,
+            )
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("message")
+                    .and_then(|message| {
+                        message.as_str()
+                    })
+                    .map(|message| {
+                        message.to_string()
+                    })
+            })
+            .unwrap_or_default();
+
+        if pending
+            .eq_ignore_ascii_case(
+                "authorization_pending",
+            )
+        {
+            sleep(
+                TokioDuration::from_secs(
+                    poll_interval,
+                ),
+            )
+            .await;
+
+            continue;
+        }
+
+        return Err(
+            format!(
+                "Twitch login mislukt {}: {}",
+                status,
+                if pending.is_empty() {
+                    body
+                } else {
+                    pending
+                }
+            ),
+        );
+    }
+}
+
+// =========================================================
+// TWITCH TOKEN VERNIEUWEN
+// =========================================================
+
+async fn refresh_twitch_token(
+    http_client: &reqwest::Client,
+    client_id: &str,
+    refresh_token: &str,
+) -> Result<StoredTwitchToken, String> {
+    let response =
+        http_client
+            .post(TWITCH_TOKEN_URL)
+            .form(&[
+                (
+                    "client_id",
+                    client_id,
+                ),
+                (
+                    "grant_type",
+                    "refresh_token",
+                ),
+                (
+                    "refresh_token",
+                    refresh_token,
+                ),
+            ])
+            .send()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Twitch token vernieuwen mislukt: {e}"
+                )
+            })?;
+
+    let status =
+        response.status();
+
+    let body =
+        response
+            .text()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Twitch refresh-antwoord kon niet worden gelezen: {e}"
+                )
+            })?;
+
+    if !status.is_success() {
+        return Err(
+            format!(
+                "Twitch-koppeling moet opnieuw worden uitgevoerd ({}): {}",
+                status,
+                body
+            ),
+        );
+    }
+
+    let token =
+        serde_json::from_str::<TwitchTokenResponse>(
+            &body,
+        )
+        .map_err(|e| {
+            format!(
+                "Twitch refresh-JSON is ongeldig: {e}"
+            )
+        })?;
+
+    save_twitch_token(
+        &token.access_token,
+        &token.refresh_token,
+    )?;
+
+    load_stored_twitch_token()?
+        .ok_or_else(|| {
+            "Vernieuwde Twitch token kon niet worden geladen"
+                .to_string()
+        })
+}
+
+// =========================================================
+// TWITCH HELIX VIEWERS
+// =========================================================
+
+async fn fetch_twitch_viewers_with_token(
+    http_client: &reqwest::Client,
+    client_id: &str,
+    channel_login: &str,
+    access_token: &str,
+) -> Result<(reqwest::StatusCode, String), String> {
+    let response =
+        http_client
+            .get(TWITCH_STREAMS_URL)
+            .query(&[
+                (
+                    "user_login",
+                    channel_login,
+                ),
+            ])
+            .header(
+                "Client-Id",
+                client_id,
+            )
+            .bearer_auth(
+                access_token,
+            )
+            .send()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Twitch viewer-opvraag mislukt: {e}"
+                )
+            })?;
+
+    let status =
+        response.status();
+
+    let body =
+        response
+            .text()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Twitch viewer-resultaat kon niet worden gelezen: {e}"
+                )
+            })?;
+
+    Ok((status, body))
+}
+
+fn parse_twitch_viewer_response(
+    body: &str,
+) -> Result<TwitchViewerResult, String> {
+    let streams =
+        serde_json::from_str::<TwitchStreamsResponse>(
+            body,
+        )
+        .map_err(|e| {
+            format!(
+                "Twitch streams-JSON is ongeldig: {e}"
+            )
+        })?;
+
+    match streams.data.first() {
+        Some(stream) => {
+            Ok(
+                TwitchViewerResult {
+                    connected: true,
+                    live: true,
+                    viewer_count:
+                        Some(
+                            stream.viewer_count,
+                        ),
+                    message:
+                        "Twitch livestream is live"
+                            .to_string(),
+                },
+            )
+        }
+
+        None => {
+            Ok(
+                TwitchViewerResult {
+                    connected: true,
+                    live: false,
+                    viewer_count: None,
+                    message:
+                        "Twitch kanaal is offline"
+                            .to_string(),
+                },
+            )
+        }
+    }
+}
+
+// =========================================================
+// TAURI COMMAND: TWITCH AUTH STATUS
+// =========================================================
+
+#[tauri::command]
+fn twitch_auth_status()
+    -> Result<TwitchAuthStatus, String>
+{
+    create_twitch_auth_status()
+}
+
+// =========================================================
+// TAURI COMMAND: TWITCH LOGIN
+// =========================================================
+
+#[tauri::command]
+async fn twitch_login(
+    app: tauri::AppHandle,
+    client_id: String,
+) -> Result<TwitchLoginResult, String> {
+    let client_id =
+        client_id
+            .trim()
+            .to_string();
+
+    if client_id.is_empty() {
+        return Err(
+            "Twitch Client ID ontbreekt"
+                .to_string(),
+        );
+    }
+
+    let http_client =
+        create_http_client()?;
+
+    let device =
+        request_twitch_device_code(
+            &http_client,
+            &client_id,
+        )
+        .await?;
+
+    println!(
+        "Twitch device code: {}",
+        device.user_code
+    );
+
+    app.opener()
+        .open_url(
+            device.verification_uri.as_str(),
+            None::<&str>,
+        )
+        .map_err(|e| {
+            format!(
+                "Twitch loginpagina kon niet worden geopend: {e}"
+            )
+        })?;
+
+    let token =
+        poll_twitch_device_token(
+            &http_client,
+            &client_id,
+            &device,
+        )
+        .await?;
+
+    save_twitch_token(
+        &token.access_token,
+        &token.refresh_token,
+    )?;
+
+    Ok(
+        TwitchLoginResult {
+            connected: true,
+            message:
+                "Twitch API succesvol gekoppeld"
+                    .to_string(),
+        },
+    )
+}
+
+// =========================================================
+// TAURI COMMAND: TWITCH VIEWER COUNT
+// =========================================================
+
+#[tauri::command]
+async fn twitch_viewer_count(
+    client_id: String,
+    channel_login: String,
+) -> Result<TwitchViewerResult, String> {
+    let client_id =
+        client_id
+            .trim()
+            .to_string();
+
+    let channel_login =
+        channel_login
+            .trim()
+            .to_lowercase();
+
+    if client_id.is_empty() {
+        return Err(
+            "Twitch Client ID ontbreekt"
+                .to_string(),
+        );
+    }
+
+    if channel_login.is_empty() {
+        return Err(
+            "Twitch kanaalnaam ontbreekt"
+                .to_string(),
+        );
+    }
+
+    let mut stored_token =
+        match load_stored_twitch_token()? {
+            Some(token) => token,
+
+            None => {
+                return Ok(
+                    TwitchViewerResult {
+                        connected: false,
+                        live: false,
+                        viewer_count: None,
+                        message:
+                            "Twitch API is nog niet gekoppeld"
+                                .to_string(),
+                    },
+                );
+            }
+        };
+
+    let http_client =
+        create_http_client()?;
+
+    let (
+        mut status,
+        mut body,
+    ) =
+        fetch_twitch_viewers_with_token(
+            &http_client,
+            &client_id,
+            &channel_login,
+            &stored_token.access_token,
+        )
+        .await?;
+
+    if status
+        == reqwest::StatusCode::UNAUTHORIZED
+    {
+        stored_token =
+            refresh_twitch_token(
+                &http_client,
+                &client_id,
+                &stored_token.refresh_token,
+            )
+            .await?;
+
+        (
+            status,
+            body,
+        ) =
+            fetch_twitch_viewers_with_token(
+                &http_client,
+                &client_id,
+                &channel_login,
+                &stored_token.access_token,
+            )
+            .await?;
+    }
+
+    if !status.is_success() {
+        return Err(
+            format!(
+                "Twitch Helix API fout {}: {}",
+                status,
+                body
+            ),
+        );
+    }
+
+    parse_twitch_viewer_response(
+        &body,
+    )
+}
+
+
 #[cfg_attr(
     mobile,
     tauri::mobile_entry_point
@@ -1938,7 +3031,11 @@ pub fn run() {
                 youtube_auth_status,
                 youtube_auto_connect,
                 youtube_start_chat_stream,
-                youtube_stop_chat_stream
+                youtube_stop_chat_stream,
+                            youtube_viewer_count,
+                twitch_auth_status,
+                twitch_login,
+                twitch_viewer_count
             ],
         )
         .run(

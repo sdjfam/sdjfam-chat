@@ -69,6 +69,44 @@ type YouTubeGrpcStatus = {
 };
 
 // =========================================================
+// SDJFAM V0.1.2 VIEWER COUNTS
+// =========================================================
+
+type TwitchAuthStatus = {
+  connected: boolean;
+  linked_at: string | null;
+  expected_expiry_at: string | null;
+  seconds_remaining: number;
+  needs_relogin: boolean;
+  expired: boolean;
+  message: string;
+};
+
+type TwitchLoginResult = {
+  connected: boolean;
+  message: string;
+};
+
+type TwitchViewerResult = {
+  connected: boolean;
+  live: boolean;
+  viewer_count: number | null;
+  message: string;
+};
+
+type YouTubeViewerResult = {
+  connected: boolean;
+  live: boolean;
+  viewer_count: number | null;
+  message: string;
+};
+
+const TWITCH_CLIENT_ID =
+  import.meta.env.VITE_TWITCH_CLIENT_ID?.trim() ?? "";
+
+const TWITCH_CHANNEL = "sdjfam";
+
+// =========================================================
 // TIMER FORMAT
 // =========================================================
 
@@ -105,12 +143,56 @@ function formatRemainingTime(
 }
 
 // =========================================================
+// ICONS
+// =========================================================
+
+function TwitchIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M4 2h17v11.2l-4.8 4.8h-3.7L10 20.5H7.5V18H3V5L4 2Zm1.5 2L5 5.5V16h4.5v2.3l2.3-2.3h4l3.2-3.2V4H5.5Zm5 3h2v5h-2V7Zm5 0h2v5h-2V7Z"
+      />
+    </svg>
+  );
+}
+
+function YouTubeIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.6 4.6 12 4.6 12 4.6s-5.6 0-7.5.5A3 3 0 0 0 2.4 7.2 31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.9.5 7.5.5 7.5.5s5.6 0 7.5-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8ZM10 15.5v-7l6 3.5-6 3.5Z"
+      />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M19.1 13a7.7 7.7 0 0 0 .1-1 7.7 7.7 0 0 0-.1-1l2.1-1.6-2-3.4-2.5 1a7.7 7.7 0 0 0-1.7-1L14.6 3h-4l-.4 3a7.7 7.7 0 0 0-1.7 1L6 6 4 9.4 6.1 11a7.7 7.7 0 0 0-.1 1 7.7 7.7 0 0 0 .1 1L4 14.6 6 18l2.5-1a7.7 7.7 0 0 0 1.7 1l.4 3h4l.4-3a7.7 7.7 0 0 0 1.7-1l2.5 1 2-3.4L19.1 13ZM12.6 16A4 4 0 1 1 12.6 8a4 4 0 0 1 0 8Z"
+      />
+    </svg>
+  );
+}
+
+// =========================================================
 // APP
 // =========================================================
 
 function App() {
-  // Chatberichten bestaan alleen in het geheugen.
-  // Na volledig afsluiten en opnieuw starten begint alles leeg.
   const [messages, setMessages] =
     useState<ChatMessage[]>([]);
 
@@ -122,6 +204,31 @@ function App() {
     twitchConnected,
     setTwitchConnected,
   ] = useState(false);
+
+  const [
+    twitchViewerCount,
+    setTwitchViewerCount,
+  ] = useState<number | null>(null);
+
+  const [
+    twitchViewerLive,
+    setTwitchViewerLive,
+  ] = useState(false);
+
+  const [
+    twitchAuthStatus,
+    setTwitchAuthStatus,
+  ] = useState<TwitchAuthStatus | null>(null);
+
+  const [
+    twitchOauthLoading,
+    setTwitchOauthLoading,
+  ] = useState(false);
+
+  const [
+    twitchOauthStatus,
+    setTwitchOauthStatus,
+  ] = useState("");
 
   // -------------------------------------------------------
   // YOUTUBE STATE
@@ -153,6 +260,25 @@ function App() {
     youtubeTitle,
     setYoutubeTitle,
   ] = useState<string | null>(null);
+
+  const [
+    youtubeViewerCount,
+    setYoutubeViewerCount,
+  ] = useState<number | null>(null);
+
+  const [
+    youtubeViewerLive,
+    setYoutubeViewerLive,
+  ] = useState(false);
+
+  // -------------------------------------------------------
+  // SETTINGS UI
+  // -------------------------------------------------------
+
+  const [
+    settingsOpen,
+    setSettingsOpen,
+  ] = useState(false);
 
   // -------------------------------------------------------
   // OAUTH / AUTO-CONNECT STATE
@@ -259,9 +385,6 @@ function App() {
           `Versie ${update.version} is beschikbaar`
         );
       } catch (error) {
-        // De eerste release heeft mogelijk nog geen latest.json.
-        // Daarom tonen we bij een mislukte automatische controle
-        // geen storende foutmelding aan de gebruiker.
         console.warn(
           "Updatecontrole niet beschikbaar:",
           error
@@ -344,8 +467,6 @@ function App() {
         }
       );
 
-      // Op Windows sluit Tauri de app automatisch
-      // wanneer de updater-installer wordt gestart.
       setUpdateStatus(
         "Update wordt geïnstalleerd..."
       );
@@ -566,7 +687,129 @@ function App() {
   }, []);
 
   // =========================================================
-  // TWITCH
+  // TWITCH API AUTH + VIEWER COUNT
+  // =========================================================
+
+  async function refreshTwitchAuthStatus() {
+    if (!TWITCH_CLIENT_ID) {
+      setTwitchAuthStatus(null);
+      return;
+    }
+
+    try {
+      const result =
+        await invoke<TwitchAuthStatus>(
+          "twitch_auth_status"
+        );
+
+      setTwitchAuthStatus(result);
+    } catch (error) {
+      console.error(
+        "Twitch auth status error:",
+        error
+      );
+
+      setTwitchAuthStatus(null);
+    }
+  }
+
+  async function refreshTwitchViewerCount() {
+    if (!TWITCH_CLIENT_ID) {
+      setTwitchViewerCount(null);
+      setTwitchViewerLive(false);
+      return;
+    }
+
+    try {
+      const result =
+        await invoke<TwitchViewerResult>(
+          "twitch_viewer_count",
+          {
+            clientId: TWITCH_CLIENT_ID,
+            channelLogin: TWITCH_CHANNEL,
+          }
+        );
+
+      setTwitchViewerLive(result.live);
+
+      setTwitchViewerCount(
+        result.live
+          ? result.viewer_count
+          : null
+      );
+    } catch (error) {
+      console.warn(
+        "Twitch viewer count niet beschikbaar:",
+        error
+      );
+
+      setTwitchViewerCount(null);
+      setTwitchViewerLive(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshTwitchAuthStatus();
+    void refreshTwitchViewerCount();
+
+    const timer =
+      window.setInterval(() => {
+        void refreshTwitchAuthStatus();
+        void refreshTwitchViewerCount();
+      }, 30000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  async function handleTwitchLogin() {
+    if (
+      twitchOauthLoading ||
+      !TWITCH_CLIENT_ID
+    ) {
+      return;
+    }
+
+    try {
+      setTwitchOauthLoading(true);
+
+      setTwitchOauthStatus(
+        "Twitch koppeling openen..."
+      );
+
+      const result =
+        await invoke<TwitchLoginResult>(
+          "twitch_login",
+          {
+            clientId: TWITCH_CLIENT_ID,
+          }
+        );
+
+      setTwitchOauthStatus(
+        result.message
+      );
+
+      await refreshTwitchAuthStatus();
+      await refreshTwitchViewerCount();
+    } catch (error) {
+      console.error(
+        "Twitch OAuth error:",
+        error
+      );
+
+      setTwitchOauthStatus(
+        `Twitch koppelen mislukt: ${String(error)}`
+      );
+
+      await refreshTwitchAuthStatus();
+    } finally {
+      setTwitchOauthLoading(false);
+    }
+  }
+
+  // =========================================================
+  // TWITCH CHAT
   // =========================================================
 
   useEffect(() => {
@@ -645,11 +888,74 @@ function App() {
   }, []);
 
   // =========================================================
+  // YOUTUBE VIEWER COUNT
+  // =========================================================
+
+  useEffect(() => {
+    if (!youtubeVideoId) {
+      setYoutubeViewerCount(null);
+      setYoutubeViewerLive(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function refreshYouTubeViewerCount() {
+      try {
+        const result =
+          await invoke<YouTubeViewerResult>(
+            "youtube_viewer_count",
+            {
+              videoId: youtubeVideoId,
+            }
+          );
+
+        if (cancelled) {
+          return;
+        }
+
+        setYoutubeViewerLive(result.live);
+
+        setYoutubeViewerCount(
+          result.live
+            ? result.viewer_count
+            : null
+        );
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        console.warn(
+          "YouTube viewer count niet beschikbaar:",
+          error
+        );
+
+        setYoutubeViewerCount(null);
+        setYoutubeViewerLive(false);
+      }
+    }
+
+    void refreshYouTubeViewerCount();
+
+    const timer =
+      window.setInterval(() => {
+        void refreshYouTubeViewerCount();
+      }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [youtubeVideoId]);
+
+  // =========================================================
   // YOUTUBE GRPC STREAMLIST
   // =========================================================
 
   useEffect(() => {
     if (!youtubeLiveChatId) {
+      setYoutubeConnected(false);
       return;
     }
 
@@ -664,17 +970,12 @@ function App() {
     let unlistenError:
       UnlistenFn | null = null;
 
-    // Nieuwe livestream = nieuwe duplicate-cache.
     youtubeMessageIdsRef.current.clear();
 
     async function startYouTubeGrpcChat(
       liveChatId: string
     ) {
       try {
-        // ---------------------------------------------------
-        // CHATBERICHTEN UIT RUST
-        // ---------------------------------------------------
-
         unlistenMessage =
           await listen<YouTubeGrpcChatMessage>(
             "youtube-chat-message",
@@ -685,6 +986,13 @@ function App() {
 
               const chat =
                 event.payload;
+
+              // Een ontvangen chatbericht bewijst dat de
+              // gRPC-livechat werkelijk verbonden is.
+              setYoutubeConnected(true);
+              setYoutubeStatus(
+                "YouTube verbonden"
+              );
 
               if (
                 youtubeMessageIdsRef.current.has(
@@ -729,10 +1037,6 @@ function App() {
           return;
         }
 
-        // ---------------------------------------------------
-        // VERBINDINGSSTATUS UIT RUST
-        // ---------------------------------------------------
-
         unlistenStatus =
           await listen<YouTubeGrpcStatus>(
             "youtube-chat-status",
@@ -744,42 +1048,52 @@ function App() {
               const status =
                 event.payload;
 
-              setYoutubeConnected(
-                status.connected
-              );
-
               switch (status.status) {
                 case "connected":
+                  setYoutubeConnected(true);
+
                   setYoutubeStatus(
                     "YouTube verbonden"
                   );
                   break;
 
                 case "reconnecting":
+                  setYoutubeConnected(false);
+
                   setYoutubeStatus(
                     "YouTube opnieuw verbinden..."
                   );
                   break;
 
                 case "offline":
+                  setYoutubeConnected(false);
+
                   setYoutubeStatus(
                     "YouTube livestream offline"
                   );
                   break;
 
                 case "stopped":
+                  setYoutubeConnected(false);
+
                   setYoutubeStatus(
                     "YouTube chatstream gestopt"
                   );
                   break;
 
                 case "error":
+                  setYoutubeConnected(false);
+
                   setYoutubeStatus(
                     "YouTube chat fout"
                   );
                   break;
 
                 default:
+                  setYoutubeConnected(
+                    status.connected
+                  );
+
                   setYoutubeStatus(
                     status.message
                   );
@@ -793,10 +1107,6 @@ function App() {
           unlistenStatus = null;
           return;
         }
-
-        // ---------------------------------------------------
-        // FOUTEN UIT RUST
-        // ---------------------------------------------------
 
         unlistenError =
           await listen<string>(
@@ -864,7 +1174,8 @@ function App() {
           return;
         }
 
-        // Pas starten NADAT alle listeners klaarstaan.
+        setYoutubeConnected(false);
+
         setYoutubeStatus(
           "YouTube livechat verbinden..."
         );
@@ -884,6 +1195,15 @@ function App() {
         console.log(
           "YouTube gRPC:",
           result
+        );
+
+        // Het backend-command is succesvol gestart.
+        // Als later een echte fout/stop komt, wordt deze
+        // status via de listeners weer teruggezet.
+        setYoutubeConnected(true);
+
+        setYoutubeStatus(
+          "YouTube verbonden"
         );
       } catch (error) {
         if (cancelled) {
@@ -916,8 +1236,8 @@ function App() {
     return () => {
       cancelled = true;
 
-      // Niet alleen de React-listeners verwijderen:
-      // ook de echte Rust/gRPC-stream stoppen.
+      setYoutubeConnected(false);
+
       void invoke<string>(
         "youtube_stop_chat_stream"
       ).catch((error) => {
@@ -1066,36 +1386,15 @@ function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="topbar-brand">
           <h1>SDJFAM Chat</h1>
 
           <p>
             Twitch + YouTube live chat
           </p>
 
-          <p
-            style={{
-              marginTop: "5px",
-              fontSize: "11px",
-              color:
-                authStatus?.needs_relogin
-                  ? "#ff8b97"
-                  : "#8f96a6",
-            }}
-          >
-            {googleLinkText}
-          </p>
-
           {updateStatus && (
-            <p
-              style={{
-                marginTop: "5px",
-                fontSize: "11px",
-                color: updateVersion
-                  ? "#c6b5ff"
-                  : "#8f96a6",
-              }}
-            >
+            <p className="update-status">
               {updateStatus}
             </p>
           )}
@@ -1105,39 +1404,13 @@ function App() {
           {updateVersion && (
             <button
               type="button"
+              className="update-button"
               onClick={
                 handleInstallUpdate
               }
               disabled={
                 updateInstalling
               }
-              style={{
-                padding:
-                  "7px 11px",
-
-                border:
-                  "1px solid rgba(145, 100, 255, 0.65)",
-
-                borderRadius:
-                  "8px",
-
-                background:
-                  "rgba(125, 80, 255, 0.15)",
-
-                color:
-                  "#c6b5ff",
-
-                fontSize:
-                  "12px",
-
-                fontWeight:
-                  700,
-
-                cursor:
-                  updateInstalling
-                    ? "default"
-                    : "pointer",
-              }}
             >
               {updateInstalling
                 ? "Update installeren..."
@@ -1145,86 +1418,89 @@ function App() {
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={
-              handleYouTubeLogin
-            }
-            disabled={
-              oauthLoading ||
-              autoConnectLoading
-            }
-            style={{
-              padding:
-                "7px 11px",
-
-              border:
-                authStatus
-                  ?.needs_relogin
-                  ? "1px solid rgba(255, 40, 65, 0.8)"
-                  : "1px solid rgba(255, 40, 65, 0.55)",
-
-              borderRadius:
-                "8px",
-
-              background:
-                authStatus
-                  ?.needs_relogin
-                  ? "rgba(255, 35, 60, 0.22)"
-                  : "rgba(255, 35, 60, 0.12)",
-
-              color:
-                "#ff8b97",
-
-              fontSize:
-                "12px",
-
-              fontWeight:
-                700,
-
-              cursor:
-                oauthLoading ||
-                autoConnectLoading
-                  ? "default"
-                  : "pointer",
-            }}
-          >
-            {oauthLoading
-              ? "Google login..."
-              : autoConnectLoading
-              ? "YouTube controleren..."
-              : authStatus
-                  ?.needs_relogin
-              ? "Google opnieuw koppelen"
-              : authStatus
-                  ?.connected
-              ? "YouTube gekoppeld"
-              : "YouTube OAuth"}
-          </button>
-
-          <span
-            className={`status twitch ${
+          <div
+            className={`platform-viewer twitch ${
               twitchConnected
                 ? "connected"
-                : ""
+                : "offline"
             }`}
+            title={
+              twitchConnected
+                ? "Twitch chat verbonden"
+                : "Twitch chat offline"
+            }
           >
-            {twitchConnected
-              ? "● Twitch"
-              : "○ Twitch"}
-          </span>
+            <div className="platform-status">
+              <TwitchIcon />
+            </div>
 
-          <span
-            className={`status youtube ${
+            <div className="viewer-count">
+              <span
+                className="viewer-eye"
+                aria-hidden="true"
+              >
+                👁
+              </span>
+
+              <strong>
+                {twitchViewerLive &&
+                twitchViewerCount !== null
+                  ? twitchViewerCount.toLocaleString()
+                  : "—"}
+              </strong>
+            </div>
+          </div>
+
+          <div
+            className={`platform-viewer youtube ${
               youtubeConnected
                 ? "connected"
+                : "offline"
+            }`}
+            title={
+              youtubeConnected
+                ? "YouTube livechat verbonden"
+                : youtubeStatus
+            }
+          >
+            <div className="platform-status">
+              <YouTubeIcon />
+            </div>
+
+            <div className="viewer-count">
+              <span
+                className="viewer-eye"
+                aria-hidden="true"
+              >
+                👁
+              </span>
+
+              <strong>
+                {youtubeViewerLive &&
+                youtubeViewerCount !== null
+                  ? youtubeViewerCount.toLocaleString()
+                  : "—"}
+              </strong>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className={`settings-button ${
+              settingsOpen
+                ? "active"
                 : ""
             }`}
+            onClick={() =>
+              setSettingsOpen(
+                (current) => !current
+              )
+            }
+            aria-label="Settings"
+            title="Settings"
           >
-            {youtubeConnected
-              ? "● YouTube"
-              : "○ YouTube"}
-          </span>
+            <SettingsIcon />
+          </button>
         </div>
       </header>
 
@@ -1243,73 +1519,21 @@ function App() {
                 : "Even wachten terwijl SDJFAM Chat verbinding maakt."}
             </p>
 
-            {authStatus && (
-              <p
-                style={{
-                  marginTop:
-                    "12px",
-
-                  color:
-                    authStatus
-                      .needs_relogin
-                      ? "#ff8b97"
-                      : "#b9c0cf",
-
-                  fontSize:
-                    "12px",
-                }}
-              >
-                {googleLinkText}
-              </p>
-            )}
-
             {oauthStatus && (
-              <p
-                style={{
-                  marginTop:
-                    "12px",
-
-                  color:
-                    "#b9c0cf",
-                }}
-              >
+              <p className="empty-oauth-status">
                 {oauthStatus}
               </p>
             )}
 
             {youtubeTitle && (
-              <p
-                style={{
-                  marginTop:
-                    "8px",
-
-                  color:
-                    "#8f96a6",
-
-                  fontSize:
-                    "12px",
-                }}
-              >
-                Live:{" "}
-                {youtubeTitle}
+              <p className="empty-live-title">
+                Live: {youtubeTitle}
               </p>
             )}
 
             {youtubeVideoId && (
-              <p
-                style={{
-                  marginTop:
-                    "4px",
-
-                  color:
-                    "#686f7e",
-
-                  fontSize:
-                    "11px",
-                }}
-              >
-                Video ID:{" "}
-                {youtubeVideoId}
+              <p className="empty-video-id">
+                Video ID: {youtubeVideoId}
               </p>
             )}
           </div>
@@ -1357,6 +1581,295 @@ function App() {
           </div>
         )}
       </section>
+
+      {settingsOpen && (
+        <div
+          className="settings-backdrop"
+          onMouseDown={() =>
+            setSettingsOpen(false)
+          }
+        >
+          <aside
+            className="settings-panel"
+            onMouseDown={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <div className="settings-header">
+              <div>
+                <h2>Settings</h2>
+
+                <p>
+                  SDJFAM Chat instellingen
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="settings-close"
+                onClick={() =>
+                  setSettingsOpen(false)
+                }
+                aria-label="Settings sluiten"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-section-title">
+                <div className="settings-twitch-icon">
+                  <TwitchIcon />
+                </div>
+
+                <div>
+                  <h3>Twitch</h3>
+
+                  <p>
+                    Chat en live kijkersaantal
+                  </p>
+                </div>
+              </div>
+
+              <div className="settings-status-card">
+                <div className="settings-status-line">
+                  <span>Chat</span>
+
+                  <strong
+                    className={
+                      twitchConnected
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {twitchConnected
+                      ? "Verbonden"
+                      : "Niet verbonden"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>Twitch API</span>
+
+                  <strong
+                    className={
+                      twitchAuthStatus?.connected &&
+                      !twitchAuthStatus?.needs_relogin &&
+                      !twitchAuthStatus?.expired
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {twitchAuthStatus?.connected
+                      ? twitchAuthStatus.expired
+                        ? "Verlopen"
+                        : "Gekoppeld"
+                      : "Niet gekoppeld"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>Kijkers</span>
+
+                  <strong>
+                    {twitchViewerLive &&
+                    twitchViewerCount !== null
+                      ? twitchViewerCount.toLocaleString()
+                      : "—"}
+                  </strong>
+                </div>
+              </div>
+
+              {!TWITCH_CLIENT_ID && (
+                <div className="settings-message">
+                  Twitch Client ID ontbreekt in deze build.
+                </div>
+              )}
+
+              {twitchOauthStatus && (
+                <div className="settings-message">
+                  {twitchOauthStatus}
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="twitch-link-button"
+                onClick={handleTwitchLogin}
+                disabled={
+                  twitchOauthLoading ||
+                  !TWITCH_CLIENT_ID
+                }
+              >
+                {twitchOauthLoading
+                  ? "Twitch koppelen..."
+                  : twitchAuthStatus?.connected
+                  ? "Twitch opnieuw koppelen"
+                  : "Twitch koppelen"}
+              </button>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-section-title">
+                <div className="settings-youtube-icon">
+                  <YouTubeIcon />
+                </div>
+
+                <div>
+                  <h3>YouTube</h3>
+
+                  <p>
+                    Google-koppeling en livestreamstatus
+                  </p>
+                </div>
+              </div>
+
+              <div className="settings-status-card">
+                <div className="settings-status-line">
+                  <span>
+                    Google koppeling
+                  </span>
+
+                  <strong
+                    className={
+                      authStatus?.connected &&
+                      !authStatus?.needs_relogin &&
+                      !authStatus?.expired
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {authStatus?.connected
+                      ? authStatus.expired
+                        ? "Verlopen"
+                        : "Gekoppeld"
+                      : "Niet gekoppeld"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>
+                    Resterende tijd
+                  </span>
+
+                  <strong>
+                    {authStatus?.connected
+                      ? formatRemainingTime(
+                          authStatus.seconds_remaining
+                        )
+                      : "—"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>
+                    Livechat
+                  </span>
+
+                  <strong
+                    className={
+                      youtubeConnected
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {youtubeConnected
+                      ? "Verbonden"
+                      : "Niet verbonden"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>
+                    Kijkers
+                  </span>
+
+                  <strong>
+                    {youtubeViewerLive &&
+                    youtubeViewerCount !== null
+                      ? youtubeViewerCount.toLocaleString()
+                      : "—"}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="settings-detail">
+                <span>
+                  Status
+                </span>
+
+                <p>
+                  {youtubeStatus}
+                </p>
+              </div>
+
+              <div className="settings-detail">
+                <span>
+                  Google
+                </span>
+
+                <p>
+                  {googleLinkText}
+                </p>
+              </div>
+
+              {youtubeTitle && (
+                <div className="settings-detail">
+                  <span>
+                    Livestream
+                  </span>
+
+                  <p>
+                    {youtubeTitle}
+                  </p>
+                </div>
+              )}
+
+              {youtubeVideoId && (
+                <div className="settings-detail">
+                  <span>
+                    Video ID
+                  </span>
+
+                  <p>
+                    {youtubeVideoId}
+                  </p>
+                </div>
+              )}
+
+              {oauthStatus && (
+                <div className="settings-message">
+                  {oauthStatus}
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="youtube-link-button"
+                onClick={
+                  handleYouTubeLogin
+                }
+                disabled={
+                  oauthLoading ||
+                  autoConnectLoading
+                }
+              >
+                {oauthLoading
+                  ? "Google login..."
+                  : autoConnectLoading
+                  ? "YouTube controleren..."
+                  : authStatus
+                      ?.needs_relogin
+                  ? "Google opnieuw koppelen"
+                  : authStatus
+                      ?.connected
+                  ? "YouTube opnieuw koppelen"
+                  : "YouTube koppelen"}
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
     </main>
   );
 }
