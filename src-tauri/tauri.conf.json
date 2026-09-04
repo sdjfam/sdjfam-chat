@@ -1,6 +1,5 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "sdjfam-chat",
+  "productName": "SDJFAM Chat",
   "version": "0.1.0",
   "identifier": "com.sdjde.sdjfam-chat",
   "build": {
@@ -12,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "sdjfam-chat",
+        "title": "SDJFAM Chat",
         "width": 800,
         "height": 600
       }
@@ -24,6 +23,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -31,5 +31,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGMUM2NDVGOTNGMjlFNTAKUldSUW52S1RYMlFjTHltSUR3NGVBd2kxNXZNQUxCUElWU2IzdEtGcm55NTNaNHg4VGpNdXRqVVQK",
+      "endpoints": [
+        "https://github.com/sdjfam/sdjfam-chat/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
