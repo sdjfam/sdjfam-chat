@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+use tauri::path::BaseDirectory;
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -366,44 +367,36 @@ struct YouTubeChatStatusEvent {
 // OAUTH CONFIG LADEN
 // =========================================================
 
-fn get_oauth_file_path()
-    -> Result<PathBuf, String>
-{
-    let manifest_dir =
-        PathBuf::from(
-            env!("CARGO_MANIFEST_DIR"),
-        );
-
-    let project_root =
-        manifest_dir
-            .parent()
-            .ok_or(
-                "Projectmap kon niet worden gevonden",
-            )?;
-
-    let oauth_path =
-        project_root
-            .join(
-                "youtube-oauth.json",
-            );
+fn get_oauth_file_path(
+    app: &tauri::AppHandle,
+) -> Result<PathBuf, String> {
+    let oauth_path = app
+        .path()
+        .resolve(
+            "../youtube-oauth.json",
+            BaseDirectory::Resource,
+        )
+        .map_err(|e| {
+            format!(
+                "OAuth resource-pad kon niet worden bepaald: {e}"
+            )
+        })?;
 
     if !oauth_path.exists() {
-        return Err(
-            format!(
-                "youtube-oauth.json niet gevonden op: {}",
-                oauth_path.display()
-            ),
-        );
+        return Err(format!(
+            "youtube-oauth.json niet gevonden op: {}",
+            oauth_path.display()
+        ));
     }
 
     Ok(oauth_path)
 }
 
-fn load_oauth_config()
-    -> Result<GoogleOAuthFile, String>
-{
+fn load_oauth_config(
+    app: &tauri::AppHandle,
+) -> Result<GoogleOAuthFile, String> {
     let oauth_path =
-        get_oauth_file_path()?;
+        get_oauth_file_path(app)?;
 
     let contents =
         fs::read_to_string(
@@ -1192,7 +1185,7 @@ async fn run_youtube_chat_stream(
             })?;
 
     let oauth_file =
-        load_oauth_config()?;
+        load_oauth_config(&app)?;
 
     let oauth_client =
         create_oauth_client(
@@ -1489,7 +1482,9 @@ fn youtube_auth_status()
 // =========================================================
 
 #[tauri::command]
-async fn youtube_auto_connect()
+async fn youtube_auto_connect(
+    app: tauri::AppHandle,
+)
     -> Result<YouTubeAutoConnectResult, String>
 {
     let stored_token =
@@ -1515,7 +1510,7 @@ async fn youtube_auto_connect()
         };
 
     let oauth_file =
-        load_oauth_config()?;
+        load_oauth_config(&app)?;
 
     let client =
         create_oauth_client(
@@ -1760,7 +1755,7 @@ async fn youtube_login(
     app: tauri::AppHandle,
 ) -> Result<YouTubeLoginResult, String> {
     let oauth_file =
-        load_oauth_config()?;
+        load_oauth_config(&app)?;
 
     let (
         listener,
