@@ -1,0 +1,318 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: #090b10;
+  color: #f5f7fb;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+/* =========================
+   APP
+   ========================= */
+
+.app-shell {
+  width: 100%;
+  height: 100vh;
+  padding: 18px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  background:
+    radial-gradient(
+      circle at 15% 0%,
+      rgba(145, 70, 255, 0.12),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 90% 100%,
+      rgba(255, 0, 45, 0.08),
+      transparent 35%
+    ),
+    #090b10;
+}
+
+/* =========================
+   TOP BAR
+   ========================= */
+
+.topbar {
+  min-height: 74px;
+  padding: 0 20px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  border: 1px solid #252a35;
+  border-radius: 14px;
+
+  background: rgba(20, 23, 31, 0.9);
+
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.22);
+}
+
+.topbar h1 {
+  margin: 0;
+
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.topbar p {
+  margin: 4px 0 0;
+
+  color: #8f96a6;
+
+  font-size: 12px;
+}
+
+/* =========================
+   CONNECTION STATUS
+   ========================= */
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status {
+  padding: 7px 11px;
+
+  border: 1px solid #303542;
+  border-radius: 8px;
+
+  background: #171a22;
+  color: #a9afbc;
+
+  font-size: 12px;
+  font-weight: 650;
+
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.status.twitch {
+  border-color: rgba(145, 70, 255, 0.35);
+  color: #b996ff;
+}
+
+.status.twitch.connected {
+  background: rgba(145, 70, 255, 0.12);
+  border-color: rgba(145, 70, 255, 0.65);
+  color: #c9afff;
+}
+
+.status.youtube {
+  border-color: rgba(255, 40, 65, 0.35);
+  color: #ff7585;
+}
+
+/* =========================
+   CHAT PANEL
+   ========================= */
+
+.chat-panel {
+  flex: 1;
+  min-height: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid #252a35;
+  border-radius: 14px;
+
+  background: rgba(15, 18, 25, 0.94);
+
+  box-shadow:
+    0 16px 45px rgba(0, 0, 0, 0.28);
+
+  overflow: hidden;
+}
+
+/* =========================
+   EMPTY STATE
+   ========================= */
+
+.empty-state {
+  max-width: 420px;
+  padding: 30px;
+
+  text-align: center;
+}
+
+.empty-state h2 {
+  margin: 0 0 8px;
+
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.empty-state p {
+  margin: 0;
+
+  color: #858c9b;
+
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* =========================
+   MESSAGE LIST
+   ========================= */
+
+.message-list {
+  width: 100%;
+  height: 100%;
+
+  padding: 14px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Scrollbar */
+
+.message-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.message-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.message-list::-webkit-scrollbar-thumb {
+  background: #303541;
+  border-radius: 20px;
+}
+
+.message-list::-webkit-scrollbar-thumb:hover {
+  background: #414755;
+}
+
+/* =========================
+   CHAT MESSAGE
+   ========================= */
+
+.chat-message {
+  width: 100%;
+
+  padding: 12px 14px;
+
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+
+  border: 1px solid #252a35;
+  border-radius: 10px;
+
+  background: rgba(24, 27, 36, 0.72);
+
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.chat-message:hover {
+  background: rgba(29, 33, 43, 0.9);
+  border-color: #303644;
+}
+
+/* =========================
+   PLATFORM BADGE
+   ========================= */
+
+.platform-badge {
+  flex-shrink: 0;
+
+  margin-top: 2px;
+  padding: 4px 7px;
+
+  border-radius: 5px;
+
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.twitch-badge {
+  background: rgba(145, 70, 255, 0.16);
+
+  border: 1px solid rgba(145, 70, 255, 0.38);
+
+  color: #bd9cff;
+}
+
+/* YouTube alvast voorbereid voor straks */
+
+.youtube-badge {
+  background: rgba(255, 35, 60, 0.14);
+
+  border: 1px solid rgba(255, 35, 60, 0.38);
+
+  color: #ff7b89;
+}
+
+/* =========================
+   MESSAGE CONTENT
+   ========================= */
+
+.message-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-content strong {
+  display: block;
+
+  margin-bottom: 3px;
+
+  color: #f5f7fb;
+
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.message-content p {
+  margin: 0;
+
+  color: #d3d7e0;
+
+  font-size: 13px;
+  line-height: 1.45;
+
+  overflow-wrap: anywhere;
+}

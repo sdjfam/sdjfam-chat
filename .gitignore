@@ -1,0 +1,44 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+target/
+src-tauri/target/
+
+# Local files
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# SDJFAM Chat private credentials
+.env
+.env.*
+!.env.example
+youtube-oauth.json
+
+# Local development checkpoints / backups
+src-tauri/src/lib-*.rs
+src/App-*.tsx
+
+# Downloaded YouTube API documentation used during development
+src-tauri/streaming-live-chat.html
