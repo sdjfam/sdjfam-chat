@@ -437,7 +437,7 @@ input {
 
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
 
   border: 1px solid #252a35;
   border-radius: 10px;
@@ -455,32 +455,72 @@ input {
 }
 
 /* =========================
-   PLATFORM BADGE
+   PLATFORM LOGO BADGE
 ========================= */
 
 .platform-badge {
+  width: 30px;
+  height: 30px;
+
   flex-shrink: 0;
 
-  margin-top: 2px;
-  padding: 4px 7px;
+  margin-top: 1px;
+  padding: 0;
 
-  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
+  border-radius: 8px;
+
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.platform-badge svg {
+  width: 17px;
+  height: 17px;
+}
+
+.chat-message:hover .platform-badge {
+  transform: translateY(-1px);
 }
 
 .twitch-badge {
-  background: rgba(145, 70, 255, 0.16);
-  border: 1px solid rgba(145, 70, 255, 0.38);
-  color: #bd9cff;
+  background: rgba(145, 70, 255, 0.15);
+  border: 1px solid rgba(145, 70, 255, 0.42);
+  color: #b78cff;
+
+  box-shadow:
+    0 0 10px rgba(145, 70, 255, 0.08);
 }
 
 .youtube-badge {
   background: rgba(255, 35, 60, 0.14);
-  border: 1px solid rgba(255, 35, 60, 0.38);
-  color: #ff7b89;
+  border: 1px solid rgba(255, 35, 60, 0.42);
+  color: #ff465a;
+
+  box-shadow:
+    0 0 10px rgba(255, 35, 60, 0.08);
+}
+
+.tiktok-badge {
+  background:
+    linear-gradient(
+      135deg,
+      rgba(37, 244, 238, 0.1),
+      rgba(254, 44, 85, 0.1)
+    );
+
+  border: 1px solid rgba(150, 150, 165, 0.34);
+  color: #f1f3f8;
+
+  box-shadow:
+    -2px 0 8px rgba(37, 244, 238, 0.08),
+    2px 0 8px rgba(254, 44, 85, 0.08);
 }
 
 /* =========================
@@ -935,6 +975,20 @@ input {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .chat-message {
+    gap: 9px;
+  }
+
+  .platform-badge {
+    width: 28px;
+    height: 28px;
+  }
+
+  .platform-badge svg {
+    width: 16px;
+    height: 16px;
   }
 
   .settings-backdrop {

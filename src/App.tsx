@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  listen,
-  type UnlistenFn,
-} from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
 import tmi from "tmi.js";
 import "./App.css";
@@ -12,7 +9,7 @@ import "./App.css";
 // TYPES
 // =========================================================
 
-type Platform = "twitch" | "youtube";
+type Platform = "twitch" | "youtube" | "tiktok";
 
 type ChatMessage = {
   id: string;
@@ -68,10 +65,6 @@ type YouTubeGrpcStatus = {
   message: string;
 };
 
-// =========================================================
-// SDJFAM V0.1.2 VIEWER COUNTS
-// =========================================================
-
 type TwitchAuthStatus = {
   connected: boolean;
   linked_at: string | null;
@@ -107,33 +100,23 @@ const TWITCH_CLIENT_ID =
 const TWITCH_CHANNEL = "sdjfam";
 
 // =========================================================
-// TIMER FORMAT
+// TIMER
 // =========================================================
 
-function formatRemainingTime(
-  seconds: number
-): string {
+function formatRemainingTime(seconds: number): string {
   if (seconds <= 0) {
     return "verlopen";
   }
 
-  const totalHours =
-    Math.floor(seconds / 3600);
-
-  const days =
-    Math.floor(totalHours / 24);
-
-  const hours =
-    totalHours % 24;
+  const totalHours = Math.floor(seconds / 3600);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
 
   if (days > 0) {
     return `${days} dagen ${hours} uur`;
   }
 
-  const minutes =
-    Math.floor(
-      (seconds % 3600) / 60
-    );
+  const minutes = Math.floor((seconds % 3600) / 60);
 
   if (hours > 0) {
     return `${hours} uur ${minutes} min`;
@@ -148,10 +131,7 @@ function formatRemainingTime(
 
 function TwitchIcon() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
       <path
         fill="currentColor"
         d="M4 2h17v11.2l-4.8 4.8h-3.7L10 20.5H7.5V18H3V5L4 2Zm1.5 2L5 5.5V16h4.5v2.3l2.3-2.3h4l3.2-3.2V4H5.5Zm5 3h2v5h-2V7Zm5 0h2v5h-2V7Z"
@@ -162,10 +142,7 @@ function TwitchIcon() {
 
 function YouTubeIcon() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
       <path
         fill="currentColor"
         d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.6 4.6 12 4.6 12 4.6s-5.6 0-7.5.5A3 3 0 0 0 2.4 7.2 31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.9.5 7.5.5 7.5.5s5.6 0 7.5-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8ZM10 15.5v-7l6 3.5-6 3.5Z"
@@ -174,18 +151,54 @@ function YouTubeIcon() {
   );
 }
 
+function TikTokIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M15.3 3c.3 2.2 1.6 3.6 3.7 3.8v3.1a8.4 8.4 0 0 1-3.7-.9v6.3a5.7 5.7 0 1 1-4.9-5.6v3.2a2.5 2.5 0 1 0 1.7 2.4V3h3.2Z"
+      />
+    </svg>
+  );
+}
+
 function SettingsIcon() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
       <path
         fill="currentColor"
         d="M19.1 13a7.7 7.7 0 0 0 .1-1 7.7 7.7 0 0 0-.1-1l2.1-1.6-2-3.4-2.5 1a7.7 7.7 0 0 0-1.7-1L14.6 3h-4l-.4 3a7.7 7.7 0 0 0-1.7 1L6 6 4 9.4 6.1 11a7.7 7.7 0 0 0-.1 1 7.7 7.7 0 0 0 .1 1L4 14.6 6 18l2.5-1a7.7 7.7 0 0 0 1.7 1l.4 3h4l.4-3a7.7 7.7 0 0 0 1.7-1l2.5 1 2-3.4L19.1 13ZM12.6 16A4 4 0 1 1 12.6 8a4 4 0 0 1 0 8Z"
       />
     </svg>
   );
+}
+
+function PlatformIcon({
+  platform,
+}: {
+  platform: Platform;
+}) {
+  if (platform === "twitch") {
+    return <TwitchIcon />;
+  }
+
+  if (platform === "youtube") {
+    return <YouTubeIcon />;
+  }
+
+  return <TikTokIcon />;
+}
+
+function getPlatformLabel(platform: Platform) {
+  if (platform === "twitch") {
+    return "Twitch";
+  }
+
+  if (platform === "youtube") {
+    return "YouTube";
+  }
+
+  return "TikTok";
 }
 
 // =========================================================
@@ -196,156 +209,90 @@ function App() {
   const [messages, setMessages] =
     useState<ChatMessage[]>([]);
 
-  // -------------------------------------------------------
-  // TWITCH STATE
-  // -------------------------------------------------------
+  // Twitch
+  const [twitchConnected, setTwitchConnected] =
+    useState(false);
 
-  const [
-    twitchConnected,
-    setTwitchConnected,
-  ] = useState(false);
+  const [twitchViewerCount, setTwitchViewerCount] =
+    useState<number | null>(null);
 
-  const [
-    twitchViewerCount,
-    setTwitchViewerCount,
-  ] = useState<number | null>(null);
+  const [twitchViewerLive, setTwitchViewerLive] =
+    useState(false);
 
-  const [
-    twitchViewerLive,
-    setTwitchViewerLive,
-  ] = useState(false);
+  const [twitchAuthStatus, setTwitchAuthStatus] =
+    useState<TwitchAuthStatus | null>(null);
 
-  const [
-    twitchAuthStatus,
-    setTwitchAuthStatus,
-  ] = useState<TwitchAuthStatus | null>(null);
+  const [twitchOauthLoading, setTwitchOauthLoading] =
+    useState(false);
 
-  const [
-    twitchOauthLoading,
-    setTwitchOauthLoading,
-  ] = useState(false);
+  const [twitchOauthStatus, setTwitchOauthStatus] =
+    useState("");
 
-  const [
-    twitchOauthStatus,
-    setTwitchOauthStatus,
-  ] = useState("");
+  // YouTube
+  const [youtubeConnected, setYoutubeConnected] =
+    useState(false);
 
-  // -------------------------------------------------------
-  // YOUTUBE STATE
-  // -------------------------------------------------------
+  const [youtubeStatus, setYoutubeStatus] =
+    useState("YouTube nog niet gekoppeld");
 
-  const [
-    youtubeConnected,
-    setYoutubeConnected,
-  ] = useState(false);
+  const [youtubeLiveChatId, setYoutubeLiveChatId] =
+    useState<string | null>(null);
 
-  const [
-    youtubeStatus,
-    setYoutubeStatus,
-  ] = useState(
-    "YouTube nog niet gekoppeld"
-  );
+  const [youtubeVideoId, setYoutubeVideoId] =
+    useState<string | null>(null);
 
-  const [
-    youtubeLiveChatId,
-    setYoutubeLiveChatId,
-  ] = useState<string | null>(null);
+  const [youtubeTitle, setYoutubeTitle] =
+    useState<string | null>(null);
 
-  const [
-    youtubeVideoId,
-    setYoutubeVideoId,
-  ] = useState<string | null>(null);
+  const [youtubeViewerCount, setYoutubeViewerCount] =
+    useState<number | null>(null);
 
-  const [
-    youtubeTitle,
-    setYoutubeTitle,
-  ] = useState<string | null>(null);
+  const [youtubeViewerLive, setYoutubeViewerLive] =
+    useState(false);
 
-  const [
-    youtubeViewerCount,
-    setYoutubeViewerCount,
-  ] = useState<number | null>(null);
+  const youtubePlatformActive =
+    youtubeConnected || youtubeViewerLive;
 
-  const [
-    youtubeViewerLive,
-    setYoutubeViewerLive,
-  ] = useState(false);
+  // Settings
+  const [settingsOpen, setSettingsOpen] =
+    useState(false);
 
-  // -------------------------------------------------------
-  // SETTINGS UI
-  // -------------------------------------------------------
+  // OAuth
+  const [oauthLoading, setOauthLoading] =
+    useState(false);
 
-  const [
-    settingsOpen,
-    setSettingsOpen,
-  ] = useState(false);
+  const [autoConnectLoading, setAutoConnectLoading] =
+    useState(true);
 
-  // -------------------------------------------------------
-  // OAUTH / AUTO-CONNECT STATE
-  // -------------------------------------------------------
+  const [oauthStatus, setOauthStatus] =
+    useState("");
 
-  const [
-    oauthLoading,
-    setOauthLoading,
-  ] = useState(false);
+  const [authStatus, setAuthStatus] =
+    useState<YouTubeAuthStatus | null>(null);
 
-  const [
-    autoConnectLoading,
-    setAutoConnectLoading,
-  ] = useState(true);
+  // Updater
+  const [updateVersion, setUpdateVersion] =
+    useState<string | null>(null);
 
-  const [
-    oauthStatus,
-    setOauthStatus,
-  ] = useState("");
+  const [updateInstalling, setUpdateInstalling] =
+    useState(false);
 
-  const [
-    authStatus,
-    setAuthStatus,
-  ] = useState<YouTubeAuthStatus | null>(
-    null
-  );
-
-  // -------------------------------------------------------
-  // UPDATER STATE
-  // -------------------------------------------------------
-
-  const [
-    updateVersion,
-    setUpdateVersion,
-  ] = useState<string | null>(null);
-
-  const [
-    updateInstalling,
-    setUpdateInstalling,
-  ] = useState(false);
-
-  const [
-    updateStatus,
-    setUpdateStatus,
-  ] = useState("");
+  const [updateStatus, setUpdateStatus] =
+    useState("");
 
   const updateRef =
     useRef<
       Awaited<ReturnType<typeof check>>
     >(null);
 
-  // -------------------------------------------------------
-  // REFERENCES
-  // -------------------------------------------------------
-
   const messageListRef =
-    useRef<HTMLDivElement | null>(
-      null
-    );
+    useRef<HTMLDivElement | null>(null);
 
   const youtubeMessageIdsRef =
-    useRef<Set<string>>(
-      new Set()
-    );
+    useRef<Set<string>>(new Set());
 
   // =========================================================
-  // AUTOMATISCHE UPDATECONTROLE
+  // UPDATE CHECK
   // =========================================================
 
   useEffect(() => {
@@ -353,16 +300,13 @@ function App() {
 
     async function checkForUpdates() {
       try {
-        const update =
-          await check({
-            timeout: 30000,
-          });
+        const update = await check({
+          timeout: 30000,
+        });
 
         if (cancelled) {
           if (update) {
-            await update.close().catch(
-              () => {}
-            );
+            await update.close().catch(() => {});
           }
 
           return;
@@ -376,10 +320,7 @@ function App() {
         }
 
         updateRef.current = update;
-
-        setUpdateVersion(
-          update.version
-        );
+        setUpdateVersion(update.version);
 
         setUpdateStatus(
           `Versie ${update.version} is beschikbaar`
@@ -400,13 +341,9 @@ function App() {
   }, []);
 
   async function handleInstallUpdate() {
-    const update =
-      updateRef.current;
+    const update = updateRef.current;
 
-    if (
-      !update ||
-      updateInstalling
-    ) {
+    if (!update || updateInstalling) {
       return;
     }
 
@@ -418,54 +355,50 @@ function App() {
       );
 
       let downloaded = 0;
-      let contentLength:
-        number | undefined;
+      let contentLength: number | undefined;
 
-      await update.downloadAndInstall(
-        (event) => {
-          switch (event.event) {
-            case "Started":
-              contentLength =
-                event.data.contentLength;
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case "Started":
+            contentLength =
+              event.data.contentLength;
 
-              setUpdateStatus(
-                `Update ${update.version} downloaden...`
-              );
-              break;
+            setUpdateStatus(
+              `Update ${update.version} downloaden...`
+            );
+            break;
 
-            case "Progress":
-              downloaded +=
-                event.data.chunkLength;
+          case "Progress":
+            downloaded +=
+              event.data.chunkLength;
 
-              if (
-                contentLength &&
-                contentLength > 0
-              ) {
-                const percentage =
-                  Math.min(
-                    100,
-                    Math.round(
-                      (
-                        downloaded /
-                        contentLength
-                      ) * 100
-                    )
-                  );
-
-                setUpdateStatus(
-                  `Update ${update.version} downloaden... ${percentage}%`
+            if (
+              contentLength &&
+              contentLength > 0
+            ) {
+              const percentage =
+                Math.min(
+                  100,
+                  Math.round(
+                    (downloaded /
+                      contentLength) *
+                      100
+                  )
                 );
-              }
-              break;
 
-            case "Finished":
               setUpdateStatus(
-                "Update gedownload. Installeren..."
+                `Update ${update.version} downloaden... ${percentage}%`
               );
-              break;
-          }
+            }
+            break;
+
+          case "Finished":
+            setUpdateStatus(
+              "Update gedownload. Installeren..."
+            );
+            break;
         }
-      );
+      });
 
       setUpdateStatus(
         "Update wordt geïnstalleerd..."
@@ -485,7 +418,7 @@ function App() {
   }
 
   // =========================================================
-  // GOOGLE KOPPELING STATUS / 7-DAGEN TIMER
+  // YOUTUBE AUTH STATUS
   // =========================================================
 
   async function refreshAuthStatus() {
@@ -520,7 +453,7 @@ function App() {
   }, []);
 
   // =========================================================
-  // YOUTUBE AUTO-CONNECT BIJ OPSTARTEN
+  // YOUTUBE AUTO CONNECT
   // =========================================================
 
   useEffect(() => {
@@ -545,6 +478,7 @@ function App() {
 
         if (result.needs_relogin) {
           setYoutubeConnected(false);
+          setYoutubeViewerLive(false);
           setYoutubeLiveChatId(null);
           setYoutubeVideoId(null);
           setYoutubeTitle(null);
@@ -553,9 +487,7 @@ function App() {
             "Google opnieuw koppelen"
           );
 
-          setOauthStatus(
-            result.message
-          );
+          setOauthStatus(result.message);
 
           await refreshAuthStatus();
           return;
@@ -563,6 +495,7 @@ function App() {
 
         if (!result.discovery_available) {
           setYoutubeConnected(false);
+          setYoutubeViewerLive(false);
           setYoutubeLiveChatId(null);
           setYoutubeVideoId(null);
           setYoutubeTitle(null);
@@ -571,15 +504,13 @@ function App() {
             "YouTube livestream-detectie tijdelijk niet beschikbaar"
           );
 
-          setOauthStatus(
-            result.message
-          );
-
+          setOauthStatus(result.message);
           return;
         }
 
         if (!result.live) {
           setYoutubeConnected(false);
+          setYoutubeViewerLive(false);
           setYoutubeLiveChatId(null);
           setYoutubeVideoId(null);
           setYoutubeTitle(null);
@@ -588,19 +519,20 @@ function App() {
             "Geen actieve YouTube livestream"
           );
 
-          setOauthStatus(
-            result.message
-          );
-
+          setOauthStatus(result.message);
           return;
         }
+
+        setYoutubeViewerLive(true);
 
         if (!result.live_chat_id) {
           setYoutubeConnected(false);
           setYoutubeLiveChatId(null);
+          setYoutubeVideoId(result.video_id);
+          setYoutubeTitle(result.title);
 
           setYoutubeStatus(
-            "YouTube livechat niet gevonden"
+            "YouTube live, maar livechat niet gevonden"
           );
 
           setOauthStatus(
@@ -644,6 +576,7 @@ function App() {
         );
 
         setYoutubeConnected(false);
+        setYoutubeViewerLive(false);
         setYoutubeLiveChatId(null);
 
         const errorText =
@@ -687,7 +620,7 @@ function App() {
   }, []);
 
   // =========================================================
-  // TWITCH API AUTH + VIEWER COUNT
+  // TWITCH AUTH + VIEWERS
   // =========================================================
 
   async function refreshTwitchAuthStatus() {
@@ -725,12 +658,16 @@ function App() {
         await invoke<TwitchViewerResult>(
           "twitch_viewer_count",
           {
-            clientId: TWITCH_CLIENT_ID,
-            channelLogin: TWITCH_CHANNEL,
+            clientId:
+              TWITCH_CLIENT_ID,
+            channelLogin:
+              TWITCH_CHANNEL,
           }
         );
 
-      setTwitchViewerLive(result.live);
+      setTwitchViewerLive(
+        result.live
+      );
 
       setTwitchViewerCount(
         result.live
@@ -782,7 +719,8 @@ function App() {
         await invoke<TwitchLoginResult>(
           "twitch_login",
           {
-            clientId: TWITCH_CLIENT_ID,
+            clientId:
+              TWITCH_CLIENT_ID,
           }
         );
 
@@ -820,7 +758,9 @@ function App() {
           reconnect: true,
         },
 
-        channels: ["sdjfam"],
+        channels: [
+          TWITCH_CHANNEL,
+        ],
       });
 
     client.on(
@@ -888,7 +828,7 @@ function App() {
   }, []);
 
   // =========================================================
-  // YOUTUBE VIEWER COUNT
+  // YOUTUBE VIEWERS
   // =========================================================
 
   useEffect(() => {
@@ -906,7 +846,8 @@ function App() {
           await invoke<YouTubeViewerResult>(
             "youtube_viewer_count",
             {
-              videoId: youtubeVideoId,
+              videoId:
+                youtubeVideoId,
             }
           );
 
@@ -914,13 +855,23 @@ function App() {
           return;
         }
 
-        setYoutubeViewerLive(result.live);
+        setYoutubeViewerLive(
+          result.live
+        );
 
         setYoutubeViewerCount(
           result.live
             ? result.viewer_count
             : null
         );
+
+        if (!result.live) {
+          setYoutubeConnected(false);
+
+          setYoutubeStatus(
+            "YouTube livestream offline"
+          );
+        }
       } catch (error) {
         if (cancelled) {
           return;
@@ -932,7 +883,6 @@ function App() {
         );
 
         setYoutubeViewerCount(null);
-        setYoutubeViewerLive(false);
       }
     }
 
@@ -950,7 +900,7 @@ function App() {
   }, [youtubeVideoId]);
 
   // =========================================================
-  // YOUTUBE GRPC STREAMLIST
+  // YOUTUBE GRPC
   // =========================================================
 
   useEffect(() => {
@@ -987,9 +937,9 @@ function App() {
               const chat =
                 event.payload;
 
-              // Een ontvangen chatbericht bewijst dat de
-              // gRPC-livechat werkelijk verbonden is.
               setYoutubeConnected(true);
+              setYoutubeViewerLive(true);
+
               setYoutubeStatus(
                 "YouTube verbonden"
               );
@@ -1048,9 +998,12 @@ function App() {
               const status =
                 event.payload;
 
-              switch (status.status) {
+              switch (
+                status.status
+              ) {
                 case "connected":
                   setYoutubeConnected(true);
+                  setYoutubeViewerLive(true);
 
                   setYoutubeStatus(
                     "YouTube verbonden"
@@ -1061,12 +1014,13 @@ function App() {
                   setYoutubeConnected(false);
 
                   setYoutubeStatus(
-                    "YouTube opnieuw verbinden..."
+                    "YouTube livechat opnieuw verbinden..."
                   );
                   break;
 
                 case "offline":
                   setYoutubeConnected(false);
+                  setYoutubeViewerLive(false);
 
                   setYoutubeStatus(
                     "YouTube livestream offline"
@@ -1094,6 +1048,12 @@ function App() {
                     status.connected
                   );
 
+                  if (
+                    status.connected
+                  ) {
+                    setYoutubeViewerLive(true);
+                  }
+
                   setYoutubeStatus(
                     status.message
                   );
@@ -1117,7 +1077,9 @@ function App() {
               }
 
               const errorText =
-                String(event.payload);
+                String(
+                  event.payload
+                );
 
               console.error(
                 "YouTube gRPC error:",
@@ -1197,10 +1159,8 @@ function App() {
           result
         );
 
-        // Het backend-command is succesvol gestart.
-        // Als later een echte fout/stop komt, wordt deze
-        // status via de listeners weer teruggezet.
         setYoutubeConnected(true);
+        setYoutubeViewerLive(true);
 
         setYoutubeStatus(
           "YouTube verbonden"
@@ -1262,7 +1222,7 @@ function App() {
   }, [youtubeLiveChatId]);
 
   // =========================================================
-  // HANDMATIGE GOOGLE / YOUTUBE OAUTH
+  // YOUTUBE LOGIN
   // =========================================================
 
   async function handleYouTubeLogin() {
@@ -1303,6 +1263,8 @@ function App() {
         result.title
       );
 
+      setYoutubeViewerLive(true);
+
       setOauthStatus(
         `${result.message} • ${result.title}`
       );
@@ -1319,10 +1281,8 @@ function App() {
       );
 
       setYoutubeConnected(false);
-
-      setYoutubeLiveChatId(
-        null
-      );
+      setYoutubeViewerLive(false);
+      setYoutubeLiveChatId(null);
 
       setYoutubeStatus(
         "YouTube niet verbonden"
@@ -1357,18 +1317,14 @@ function App() {
   }, [messages]);
 
   // =========================================================
-  // GOOGLE TIMER TEKST
+  // GOOGLE STATUS TEXT
   // =========================================================
 
   let googleLinkText =
     "Google niet gekoppeld";
 
-  if (
-    authStatus?.connected
-  ) {
-    if (
-      authStatus.expired
-    ) {
+  if (authStatus?.connected) {
+    if (authStatus.expired) {
       googleLinkText =
         "Google koppeling verlopen";
     } else {
@@ -1387,7 +1343,9 @@ function App() {
     <main className="app-shell">
       <header className="topbar">
         <div className="topbar-brand">
-          <h1>SDJFAM Chat</h1>
+          <h1>
+            SDJFAM Chat
+          </h1>
 
           <p>
             Twitch + YouTube live chat
@@ -1420,14 +1378,14 @@ function App() {
 
           <div
             className={`platform-viewer twitch ${
-              twitchConnected
+              twitchViewerLive
                 ? "connected"
                 : "offline"
             }`}
             title={
-              twitchConnected
-                ? "Twitch chat verbonden"
-                : "Twitch chat offline"
+              twitchViewerLive
+                ? "Twitch livestream actief"
+                : "Twitch offline"
             }
           >
             <div className="platform-status">
@@ -1453,13 +1411,15 @@ function App() {
 
           <div
             className={`platform-viewer youtube ${
-              youtubeConnected
+              youtubePlatformActive
                 ? "connected"
                 : "offline"
             }`}
             title={
-              youtubeConnected
-                ? "YouTube livechat verbonden"
+              youtubePlatformActive
+                ? youtubeConnected
+                  ? "YouTube live en livechat verbonden"
+                  : "YouTube livestream actief"
                 : youtubeStatus
             }
           >
@@ -1493,7 +1453,8 @@ function App() {
             }`}
             onClick={() =>
               setSettingsOpen(
-                (current) => !current
+                (current) =>
+                  !current
               )
             }
             aria-label="Settings"
@@ -1509,8 +1470,8 @@ function App() {
           <div className="empty-state">
             <h2>
               {twitchConnected
-                ? "Twitch verbonden"
-                : "Twitch verbinden..."}
+                ? "Twitch chat verbonden"
+                : "Twitch chat verbinden..."}
             </h2>
 
             <p>
@@ -1533,7 +1494,8 @@ function App() {
 
             {youtubeVideoId && (
               <p className="empty-video-id">
-                Video ID: {youtubeVideoId}
+                Video ID:{" "}
+                {youtubeVideoId}
               </p>
             )}
           </div>
@@ -1553,17 +1515,23 @@ function App() {
                   }
                 >
                   <span
-                    className={`platform-badge ${
-                      chat.platform ===
-                      "twitch"
-                        ? "twitch-badge"
-                        : "youtube-badge"
-                    }`}
+                    className={`platform-badge ${chat.platform}-badge`}
+                    title={
+                      getPlatformLabel(
+                        chat.platform
+                      )
+                    }
+                    aria-label={
+                      getPlatformLabel(
+                        chat.platform
+                      )
+                    }
                   >
-                    {chat.platform ===
-                    "twitch"
-                      ? "TWITCH"
-                      : "YOUTUBE"}
+                    <PlatformIcon
+                      platform={
+                        chat.platform
+                      }
+                    />
                   </span>
 
                   <div className="message-content">
@@ -1597,7 +1565,9 @@ function App() {
           >
             <div className="settings-header">
               <div>
-                <h2>Settings</h2>
+                <h2>
+                  Settings
+                </h2>
 
                 <p>
                   SDJFAM Chat instellingen
@@ -1623,7 +1593,9 @@ function App() {
                 </div>
 
                 <div>
-                  <h3>Twitch</h3>
+                  <h3>
+                    Twitch
+                  </h3>
 
                   <p>
                     Chat en live kijkersaantal
@@ -1633,7 +1605,9 @@ function App() {
 
               <div className="settings-status-card">
                 <div className="settings-status-line">
-                  <span>Chat</span>
+                  <span>
+                    Chat
+                  </span>
 
                   <strong
                     className={
@@ -1649,7 +1623,27 @@ function App() {
                 </div>
 
                 <div className="settings-status-line">
-                  <span>Twitch API</span>
+                  <span>
+                    Livestream
+                  </span>
+
+                  <strong
+                    className={
+                      twitchViewerLive
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {twitchViewerLive
+                      ? "Live"
+                      : "Offline"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>
+                    Twitch API
+                  </span>
 
                   <strong
                     className={
@@ -1669,7 +1663,9 @@ function App() {
                 </div>
 
                 <div className="settings-status-line">
-                  <span>Kijkers</span>
+                  <span>
+                    Kijkers
+                  </span>
 
                   <strong>
                     {twitchViewerLive &&
@@ -1695,7 +1691,9 @@ function App() {
               <button
                 type="button"
                 className="twitch-link-button"
-                onClick={handleTwitchLogin}
+                onClick={
+                  handleTwitchLogin
+                }
                 disabled={
                   twitchOauthLoading ||
                   !TWITCH_CLIENT_ID
@@ -1704,8 +1702,8 @@ function App() {
                 {twitchOauthLoading
                   ? "Twitch koppelen..."
                   : twitchAuthStatus?.connected
-                  ? "Twitch opnieuw koppelen"
-                  : "Twitch koppelen"}
+                    ? "Twitch opnieuw koppelen"
+                    : "Twitch koppelen"}
               </button>
             </div>
 
@@ -1716,7 +1714,9 @@ function App() {
                 </div>
 
                 <div>
-                  <h3>YouTube</h3>
+                  <h3>
+                    YouTube
+                  </h3>
 
                   <p>
                     Google-koppeling en livestreamstatus
@@ -1776,6 +1776,24 @@ function App() {
                     {youtubeConnected
                       ? "Verbonden"
                       : "Niet verbonden"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>
+                    Livestream
+                  </span>
+
+                  <strong
+                    className={
+                      youtubeViewerLive
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {youtubeViewerLive
+                      ? "Live"
+                      : "Offline"}
                   </strong>
                 </div>
 
@@ -1857,14 +1875,12 @@ function App() {
                 {oauthLoading
                   ? "Google login..."
                   : autoConnectLoading
-                  ? "YouTube controleren..."
-                  : authStatus
-                      ?.needs_relogin
-                  ? "Google opnieuw koppelen"
-                  : authStatus
-                      ?.connected
-                  ? "YouTube opnieuw koppelen"
-                  : "YouTube koppelen"}
+                    ? "YouTube controleren..."
+                    : authStatus?.needs_relogin
+                      ? "Google opnieuw koppelen"
+                      : authStatus?.connected
+                        ? "YouTube opnieuw koppelen"
+                        : "YouTube koppelen"}
               </button>
             </div>
           </aside>
