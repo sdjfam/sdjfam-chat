@@ -34,4 +34,6 @@ prost = "0.14.4"
 tonic-prost = "0.14.6"
 prost-types = "0.14.4"
 tauri-plugin-updater = "2.11.0"
+futures-util = "0.3.34"
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
 

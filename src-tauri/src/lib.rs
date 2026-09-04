@@ -1,10 +1,13 @@
+const TWITCH_EVENTSUB_SCOPES: &str = "moderator:read:followers channel:read:subscriptions bits:read";
 pub mod youtube_api {
     tonic::include_proto!("youtube.api.v3");
 }
 
 mod event_engine;
-
+
+mod twitch_eventsub;
 use event_engine::{EventType, Platform, SdjfamEvent};
+use twitch_eventsub::{twitch_start_eventsub, twitch_stop_eventsub};
 
 
 use chrono::{DateTime, Duration, Utc};
@@ -2476,7 +2479,7 @@ async fn request_twitch_device_code(
             .post(TWITCH_DEVICE_URL)
             .form(&[
                 ("client_id", client_id),
-                ("scopes", ""),
+                ("scopes", TWITCH_EVENTSUB_SCOPES),
             ])
             .send()
             .await
@@ -2548,10 +2551,7 @@ async fn poll_twitch_device_token(
                 .post(TWITCH_TOKEN_URL)
                 .form(&[
                     ("client_id", client_id),
-                    (
-                        "scopes",
-                        "",
-                    ),
+                    ("scopes", TWITCH_EVENTSUB_SCOPES),
                     (
                         "device_code",
                         device.device_code.as_str(),
@@ -3069,6 +3069,8 @@ pub fn run() {
                 youtube_start_chat_stream,
                 youtube_stop_chat_stream,
                             youtube_viewer_count,
+                twitch_start_eventsub,
+                twitch_stop_eventsub,
                 twitch_auth_status,
                 twitch_login,
                 twitch_viewer_count
