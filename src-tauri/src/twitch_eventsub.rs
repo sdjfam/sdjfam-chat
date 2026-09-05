@@ -77,7 +77,7 @@ struct TwitchValidateResponse {
     user_id: Option<String>,
 
     #[serde(default)]
-    scopes: Vec<String>,
+    scopes: Option<Vec<String>>,
 }
 
 async fn validate_twitch_token(
@@ -143,7 +143,9 @@ async fn validate_twitch_token(
             .filter(|required| {
                 !validation
                     .scopes
-                    .iter()
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
                     .any(|scope| {
                         scope == **required
                     })

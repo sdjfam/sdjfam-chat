@@ -80,6 +80,27 @@ type TwitchLoginResult = {
   message: string;
 };
 
+type TwitchEventSubStatus = {
+  status: string;
+  message: string;
+};
+
+type SdjfamEvent = {
+  id: string;
+  platform: Platform | "system";
+  event_type: string;
+  user: { username: string | null; display_name: string | null } | null;
+  message: string | null;
+};
+
+// Serialize start/stop across effect cleanup, login and remounts.
+let twitchEventSubLifecycle: Promise<void> = Promise.resolve();
+
+function eventSubNeedsRelogin(status: TwitchEventSubStatus): boolean {
+  return status.status === "auth_error" || status.status === "revoked" ||
+    /ontbrekende rechten|scope|opnieuw.*koppel|koppel.*opnieuw|niet gekoppeld|nog niet gekoppeld|401|403/i.test(status.message);
+}
+
 type TwitchViewerResult = {
   connected: boolean;
   live: boolean;
@@ -227,6 +248,11 @@ function App() {
 
   const [twitchOauthStatus, setTwitchOauthStatus] =
     useState("");
+
+  const [twitchEventSubStatus, setTwitchEventSubStatus] =
+    useState<TwitchEventSubStatus>({ status: "idle", message: "Twitch EventSub voorbereiden..." });
+  const [twitchEventSubGeneration, setTwitchEventSubGeneration] = useState(0);
+  const twitchEventIdsRef = useRef<Set<string>>(new Set());
 
   // YouTube
   const [youtubeConnected, setYoutubeConnected] =
@@ -700,6 +726,64 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const unlisteners: UnlistenFn[] = [];
+    let startAttempted = false;
+
+    const setup = async () => {
+      if (cancelled) return;
+      if (!TWITCH_CLIENT_ID) {
+        setTwitchEventSubStatus({ status: "error", message: "Twitch EventSub kan niet starten: VITE_TWITCH_CLIENT_ID ontbreekt in deze build." });
+        return;
+      }
+      try {
+        const statusUnlisten = await listen<TwitchEventSubStatus>("twitch-eventsub-status", ({ payload }) => {
+          if (!cancelled) setTwitchEventSubStatus(payload);
+        });
+        if (cancelled) { statusUnlisten(); return; }
+        unlisteners.push(statusUnlisten);
+
+        const eventUnlisten = await listen<SdjfamEvent>("sdjfam-event", ({ payload }) => {
+          if (cancelled || payload.platform !== "twitch" || payload.event_type === "chat_message") return;
+          const ids = twitchEventIdsRef.current;
+          if (ids.has(payload.id)) return;
+          ids.add(payload.id);
+          if (ids.size > 1000) ids.delete(ids.values().next().value!);
+          setMessages((current) => [...current, {
+            id: `eventsub:${payload.id}`,
+            platform: "twitch",
+            username: payload.user?.display_name || payload.user?.username || "Twitch",
+            message: payload.message || `Twitch-event: ${payload.event_type}`,
+          }]);
+        });
+        if (cancelled) { eventUnlisten(); return; }
+        unlisteners.push(eventUnlisten);
+
+        setTwitchEventSubStatus({ status: "connecting", message: "Twitch EventSub starten..." });
+        startAttempted = true;
+        // Only the backend's connected event confirms active subscriptions.
+        await invoke("twitch_start_eventsub", { clientId: TWITCH_CLIENT_ID });
+      } catch (error) {
+        if (!cancelled) setTwitchEventSubStatus({ status: "error", message: String(error) });
+        unlisteners.splice(0).forEach((unlisten) => unlisten());
+      }
+    };
+
+    twitchEventSubLifecycle = twitchEventSubLifecycle.then(setup);
+    return () => {
+      cancelled = true;
+      unlisteners.splice(0).forEach((unlisten) => unlisten());
+      twitchEventSubLifecycle = twitchEventSubLifecycle.then(async () => {
+        if (startAttempted) {
+          await invoke("twitch_stop_eventsub").catch((error) => {
+            console.warn("Twitch EventSub stoppen mislukt:", error);
+          });
+        }
+      });
+    };
+  }, [twitchEventSubGeneration]);
+
   async function handleTwitchLogin() {
     if (
       twitchOauthLoading ||
@@ -728,6 +812,9 @@ function App() {
         result.message
       );
 
+      if (result.connected) {
+        setTwitchEventSubGeneration((generation) => generation + 1);
+      }
       await refreshTwitchAuthStatus();
       await refreshTwitchViewerCount();
     } catch (error) {
@@ -1676,6 +1763,26 @@ function App() {
                 </div>
               </div>
 
+              <div className="settings-status-card" role="status">
+                <div className="settings-status-line">
+                  <span>EventSub</span>
+                  <strong className={twitchEventSubStatus.status === "connected" ? "status-good" : "status-muted"}>
+                    {twitchEventSubStatus.status === "connected" ? "Actief"
+                      : eventSubNeedsRelogin(twitchEventSubStatus) ? "Opnieuw koppelen"
+                      : ["connecting", "socket_connected"].includes(twitchEventSubStatus.status) ? "Verbinden..."
+                      : twitchEventSubStatus.status === "reconnecting" ? "Opnieuw verbinden..."
+                      : "Niet actief"}
+                  </strong>
+                </div>
+                <p className="settings-message">{twitchEventSubStatus.message}</p>
+                {eventSubNeedsRelogin(twitchEventSubStatus) && (
+                  <p className="settings-message">
+                    Klik hieronder op Twitch opnieuw koppelen en geef toestemming voor de EventSub-rechten
+                    (volgers, abonnementen en bits). EventSub start daarna automatisch opnieuw.
+                  </p>
+                )}
+              </div>
+
               {!TWITCH_CLIENT_ID && (
                 <div className="settings-message">
                   Twitch Client ID ontbreekt in deze build.
@@ -1701,7 +1808,7 @@ function App() {
               >
                 {twitchOauthLoading
                   ? "Twitch koppelen..."
-                  : twitchAuthStatus?.connected
+                  : twitchAuthStatus?.connected || eventSubNeedsRelogin(twitchEventSubStatus)
                     ? "Twitch opnieuw koppelen"
                     : "Twitch koppelen"}
               </button>
