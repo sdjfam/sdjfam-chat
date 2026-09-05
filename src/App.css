@@ -1064,3 +1064,89 @@ SMALL WINDOW
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* =========================
+SDJFAM ALERT OVERLAY
+========================= */
+
+.sdjfam-alert-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+
+  padding-top: 28px;
+
+  pointer-events: none;
+}
+
+.sdjfam-alert-card {
+  min-width: 280px;
+  max-width: min(520px, calc(100vw - 32px));
+
+  padding: 18px 22px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+
+  border: 1px solid rgba(145, 70, 255, 0.55);
+  border-radius: 16px;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(27, 20, 43, 0.97),
+      rgba(13, 14, 19, 0.97)
+    );
+
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.45),
+    0 0 30px rgba(145, 70, 255, 0.18);
+
+  text-align: center;
+
+  animation: sdjfam-alert-in 260ms ease-out;
+}
+
+.sdjfam-alert-label {
+  color: #b59cff;
+
+  font-size: 11px;
+  font-weight: 800;
+
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sdjfam-alert-name {
+  color: #ffffff;
+
+  font-size: 24px;
+  line-height: 1.15;
+
+  word-break: break-word;
+}
+
+.sdjfam-alert-message {
+  color: #aeb5c2;
+
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@keyframes sdjfam-alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
 import tmi from "tmi.js";
+
+import AlertOverlay from "./alerts/AlertOverlay";
 import "./App.css";
 
 // =========================================================
@@ -85,15 +87,26 @@ type TwitchEventSubStatus = {
   message: string;
 };
 
-type SdjfamEvent = {
+export type SdjfamEvent = {
   id: string;
   platform: Platform | "system";
   event_type: string;
+
   user: {
+    id?: string | null;
     username: string | null;
     display_name: string | null;
   } | null;
+
   message: string | null;
+
+  amount?: {
+    value: number;
+    currency: string | null;
+  } | null;
+
+  raw_event_type?: string | null;
+  metadata?: unknown;
 };
 
 type TwitchViewerResult = {
@@ -110,8 +123,24 @@ type YouTubeViewerResult = {
   message: string;
 };
 
-// Serialize start/stop across effect cleanup, login and remounts.
+// =========================================================
+// GLOBALS
+// =========================================================
+
 let twitchEventSubLifecycle: Promise<void> = Promise.resolve();
+
+const TWITCH_CLIENT_ID =
+  import.meta.env.VITE_TWITCH_CLIENT_ID?.trim() ?? "";
+
+const TWITCH_CHANNEL = "sdjfam";
+
+const ALERT_EVENT_TYPES = new Set([
+  "follow",
+  "subscription",
+  "gift_subscription",
+  "bits",
+  "raid",
+]);
 
 function eventSubNeedsRelogin(
   status: TwitchEventSubStatus
@@ -124,15 +153,6 @@ function eventSubNeedsRelogin(
     )
   );
 }
-
-const TWITCH_CLIENT_ID =
-  import.meta.env.VITE_TWITCH_CLIENT_ID?.trim() ?? "";
-
-const TWITCH_CHANNEL = "sdjfam";
-
-// =========================================================
-// TIMER
-// =========================================================
 
 function formatRemainingTime(seconds: number): string {
   if (seconds <= 0) {
@@ -240,6 +260,27 @@ function App() {
   const [messages, setMessages] =
     useState<ChatMessage[]>([]);
 
+  const messageListRef =
+    useRef<HTMLDivElement | null>(null);
+
+  // Alerts
+  const [activeAlert, setActiveAlert] =
+    useState<SdjfamEvent | null>(null);
+
+  useEffect(() => {
+    if (!activeAlert) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setActiveAlert(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [activeAlert]);
+
   // Twitch
   const [twitchConnected, setTwitchConnected] =
     useState(false);
@@ -273,7 +314,7 @@ function App() {
   const twitchEventIdsRef =
     useRef<Set<string>>(new Set());
 
-  // Event Engine simulator
+  // Simulator
   const [
     eventSimulatorLoading,
     setEventSimulatorLoading,
@@ -305,6 +346,9 @@ function App() {
 
   const [youtubeViewerLive, setYoutubeViewerLive] =
     useState(false);
+
+  const youtubeMessageIdsRef =
+    useRef<Set<string>>(new Set());
 
   const youtubePlatformActive =
     youtubeConnected || youtubeViewerLive;
@@ -338,12 +382,6 @@ function App() {
 
   const updateRef =
     useRef<Awaited<ReturnType<typeof check>>>(null);
-
-  const messageListRef =
-    useRef<HTMLDivElement | null>(null);
-
-  const youtubeMessageIdsRef =
-    useRef<Set<string>>(new Set());
 
   // =========================================================
   // UPDATE CHECK
@@ -414,8 +452,7 @@ function App() {
       await update.downloadAndInstall((event) => {
         switch (event.event) {
           case "Started":
-            contentLength =
-              event.data.contentLength;
+            contentLength = event.data.contentLength;
 
             setUpdateStatus(
               `Update ${update.version} downloaden...`
@@ -423,8 +460,7 @@ function App() {
             break;
 
           case "Progress":
-            downloaded +=
-              event.data.chunkLength;
+            downloaded += event.data.chunkLength;
 
             if (
               contentLength &&
@@ -434,9 +470,7 @@ function App() {
                 Math.min(
                   100,
                   Math.round(
-                    (downloaded /
-                      contentLength) *
-                      100
+                    (downloaded / contentLength) * 100
                   )
                 );
 
@@ -633,8 +667,7 @@ function App() {
         setYoutubeViewerLive(false);
         setYoutubeLiveChatId(null);
 
-        const errorText =
-          String(error);
+        const errorText = String(error);
 
         if (
           errorText.includes(
@@ -755,12 +788,14 @@ function App() {
   }, []);
 
   // =========================================================
-  // TWITCH EVENTSUB
+  // TWITCH EVENTSUB + ALERT ROUTING
   // =========================================================
 
   useEffect(() => {
     let cancelled = false;
+
     const unlisteners: UnlistenFn[] = [];
+
     let startAttempted = false;
 
     const setup = async () => {
@@ -806,10 +841,8 @@ function App() {
             ({ payload }) => {
               if (
                 cancelled ||
-                payload.platform !==
-                  "twitch" ||
-                payload.event_type ===
-                  "chat_message"
+                payload.platform !== "twitch" ||
+                payload.event_type === "chat_message"
               ) {
                 return;
               }
@@ -830,6 +863,16 @@ function App() {
                 if (firstId) {
                   ids.delete(firstId);
                 }
+              }
+
+              // Alle ondersteunde Twitch alert-events
+              // lopen nu door dezelfde alert-route.
+              if (
+                ALERT_EVENT_TYPES.has(
+                  payload.event_type
+                )
+              ) {
+                setActiveAlert(payload);
               }
 
               setMessages(
@@ -986,7 +1029,7 @@ function App() {
   }
 
   // =========================================================
-  // SDJFAM EVENT ENGINE SIMULATOR
+  // EVENT ENGINE SIMULATOR
   // =========================================================
 
   async function handleSimulateEvent(
@@ -1184,7 +1227,7 @@ function App() {
   }, [youtubeVideoId]);
 
   // =========================================================
-  // YOUTUBE GRPC
+  // YOUTUBE GRPC CHAT
   // =========================================================
 
   useEffect(() => {
@@ -1288,7 +1331,6 @@ function App() {
                 case "connected":
                   setYoutubeConnected(true);
                   setYoutubeViewerLive(true);
-
                   setYoutubeStatus(
                     "YouTube verbonden"
                   );
@@ -1296,7 +1338,6 @@ function App() {
 
                 case "reconnecting":
                   setYoutubeConnected(false);
-
                   setYoutubeStatus(
                     "YouTube livechat opnieuw verbinden..."
                   );
@@ -1305,7 +1346,6 @@ function App() {
                 case "offline":
                   setYoutubeConnected(false);
                   setYoutubeViewerLive(false);
-
                   setYoutubeStatus(
                     "YouTube livestream offline"
                   );
@@ -1313,7 +1353,6 @@ function App() {
 
                 case "stopped":
                   setYoutubeConnected(false);
-
                   setYoutubeStatus(
                     "YouTube chatstream gestopt"
                   );
@@ -1321,7 +1360,6 @@ function App() {
 
                 case "error":
                   setYoutubeConnected(false);
-
                   setYoutubeStatus(
                     "YouTube chat fout"
                   );
@@ -1625,6 +1663,10 @@ function App() {
 
   return (
     <main className="app-shell">
+      <AlertOverlay
+        event={activeAlert}
+      />
+
       <header className="topbar">
         <div className="topbar-brand">
           <h1>
