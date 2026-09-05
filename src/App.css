@@ -29,7 +29,7 @@ input {
 }
 
 /* =========================
-   APP
+APP
 ========================= */
 
 .app-shell {
@@ -56,7 +56,7 @@ input {
 }
 
 /* =========================
-   TOP BAR
+TOP BAR
 ========================= */
 
 .topbar {
@@ -101,7 +101,7 @@ input {
 }
 
 /* =========================
-   TOPBAR STATUS
+TOPBAR STATUS
 ========================= */
 
 .status-row {
@@ -265,7 +265,7 @@ input {
 }
 
 /* =========================
-   SETTINGS BUTTON
+SETTINGS BUTTON
 ========================= */
 
 .settings-button {
@@ -295,7 +295,7 @@ input {
 }
 
 /* =========================
-   UPDATE BUTTON
+UPDATE BUTTON
 ========================= */
 
 .update-button {
@@ -329,7 +329,7 @@ input {
 }
 
 /* =========================
-   CHAT PANEL
+CHAT PANEL
 ========================= */
 
 .chat-panel {
@@ -352,7 +352,7 @@ input {
 }
 
 /* =========================
-   EMPTY STATE
+EMPTY STATE
 ========================= */
 
 .empty-state {
@@ -392,7 +392,7 @@ input {
 }
 
 /* =========================
-   MESSAGE LIST
+MESSAGE LIST
 ========================= */
 
 .message-list {
@@ -427,7 +427,7 @@ input {
 }
 
 /* =========================
-   CHAT MESSAGE
+CHAT MESSAGE
 ========================= */
 
 .chat-message {
@@ -455,7 +455,7 @@ input {
 }
 
 /* =========================
-   PLATFORM LOGO BADGE
+PLATFORM LOGO BADGE
 ========================= */
 
 .platform-badge {
@@ -524,7 +524,7 @@ input {
 }
 
 /* =========================
-   MESSAGE CONTENT
+MESSAGE CONTENT
 ========================= */
 
 .message-content {
@@ -555,7 +555,7 @@ input {
 }
 
 /* =========================
-   SETTINGS OVERLAY
+SETTINGS OVERLAY
 ========================= */
 
 .settings-backdrop {
@@ -599,8 +599,6 @@ input {
   scrollbar-color: #6540a8 transparent;
 }
 
-/* Custom Settings scrollbar */
-
 .settings-panel::-webkit-scrollbar {
   width: 8px;
 }
@@ -640,7 +638,7 @@ input {
 }
 
 /* =========================
-   SETTINGS HEADER
+SETTINGS HEADER
 ========================= */
 
 .settings-header {
@@ -702,7 +700,7 @@ input {
 }
 
 /* =========================
-   SETTINGS SECTION
+SETTINGS SECTION
 ========================= */
 
 .settings-section {
@@ -767,7 +765,7 @@ input {
 }
 
 /* =========================
-   SETTINGS STATUS
+SETTINGS STATUS
 ========================= */
 
 .settings-status-card {
@@ -819,7 +817,7 @@ input {
 }
 
 /* =========================
-   SETTINGS DETAILS
+SETTINGS DETAILS
 ========================= */
 
 .settings-detail {
@@ -868,7 +866,7 @@ input {
 }
 
 /* =========================
-   TWITCH + YOUTUBE BUTTONS
+TWITCH + YOUTUBE BUTTONS
 ========================= */
 
 .twitch-link-button,
@@ -888,7 +886,8 @@ input {
   transition:
     background 0.2s ease,
     border-color 0.2s ease,
-    color 0.2s ease;
+    color 0.2s ease,
+    transform 0.15s ease;
 }
 
 .twitch-link-button {
@@ -900,6 +899,7 @@ input {
 .twitch-link-button:hover:not(:disabled) {
   background: rgba(145, 70, 255, 0.2);
   border-color: rgba(160, 105, 255, 0.75);
+  transform: translateY(-1px);
 }
 
 .youtube-link-button {
@@ -911,6 +911,7 @@ input {
 .youtube-link-button:hover:not(:disabled) {
   background: rgba(255, 35, 60, 0.19);
   border-color: rgba(255, 40, 65, 0.75);
+  transform: translateY(-1px);
 }
 
 .twitch-link-button:disabled,
@@ -920,7 +921,65 @@ input {
 }
 
 /* =========================
-   SMALL WINDOW
+COMPACT EVENT ENGINE SIMULATOR
+========================= */
+
+/*
+  De simulator-knoppen zitten binnen een settings-status-card.
+  De normale "Twitch opnieuw koppelen"-knop zit daarbuiten en
+  blijft daardoor gewoon full-width.
+*/
+
+.settings-status-card > .settings-message {
+  margin: 0;
+  padding: 10px 12px;
+
+  border: 0;
+  border-top: 1px solid #252a34;
+  border-radius: 0;
+
+  background: transparent;
+
+  color: #8f97a5;
+  line-height: 1.4;
+}
+
+.settings-status-card .settings-message + div {
+  margin-top: 0 !important;
+  padding: 10px 12px 12px;
+
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px !important;
+}
+
+.settings-status-card .twitch-link-button {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+
+  margin-top: 0;
+  padding: 7px 6px;
+
+  border-radius: 7px;
+
+  font-size: 10.5px;
+  font-weight: 700;
+
+  white-space: nowrap;
+}
+
+.settings-status-card .settings-message + div + .settings-message {
+  margin: 0;
+  padding: 9px 12px;
+
+  border-top: 1px solid #252a34;
+
+  color: #9fa7b5;
+}
+
+/* =========================
+SMALL WINDOW
 ========================= */
 
 @media (max-width: 620px) {
@@ -997,5 +1056,11 @@ input {
 
   .settings-panel {
     width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .settings-status-card .settings-message + div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

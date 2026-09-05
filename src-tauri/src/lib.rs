@@ -1,12 +1,12 @@
-const TWITCH_EVENTSUB_SCOPES: &str = "moderator:read:followers channel:read:subscriptions bits:read";
+﻿const TWITCH_EVENTSUB_SCOPES: &str = "moderator:read:followers channel:read:subscriptions bits:read";
 pub mod youtube_api {
     tonic::include_proto!("youtube.api.v3");
 }
 
 mod event_engine;
-
+
 mod twitch_eventsub;
-use event_engine::{EventType, Platform, SdjfamEvent};
+use event_engine::{EventAmount, EventType, EventUser, Platform, SdjfamEvent};
 use twitch_eventsub::{twitch_start_eventsub, twitch_stop_eventsub};
 
 
@@ -3047,6 +3047,142 @@ fn event_engine_test() -> SdjfamEvent {
         }),
     )
 }
+
+// =========================================================
+// SDJFAM EVENT ENGINE SIMULATOR
+// =========================================================
+
+#[tauri::command]
+fn event_engine_simulate(
+    app: tauri::AppHandle,
+    event_type: String,
+) -> Result<SdjfamEvent, String> {
+    let id = format!(
+        "sdjfam-sim-{}",
+        Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_default()
+    );
+
+    let user = EventUser::new(
+        Some("sdjfam-test-user".to_string()),
+        Some("testviewer".to_string()),
+        Some("Test Viewer".to_string()),
+    );
+
+    let event = match event_type.as_str() {
+        "follow" => {
+            SdjfamEvent::new(
+                id,
+                Platform::Twitch,
+                EventType::Follow,
+            )
+            .with_user(user)
+            .with_message(
+                "Test Viewer volgt het kanaal",
+            )
+            .with_raw_event_type(
+                "simulated.follow",
+            )
+        }
+
+        "subscription" => {
+            SdjfamEvent::new(
+                id,
+                Platform::Twitch,
+                EventType::Subscription,
+            )
+            .with_user(user)
+            .with_message(
+                "Test Viewer heeft zich geabonneerd",
+            )
+            .with_raw_event_type(
+                "simulated.subscription",
+            )
+        }
+
+        "gift_subscription" => {
+            SdjfamEvent::new(
+                id,
+                Platform::Twitch,
+                EventType::GiftSubscription,
+            )
+            .with_user(user)
+            .with_message(
+                "Test Viewer heeft 5 subs cadeau gedaan",
+            )
+            .with_raw_event_type(
+                "simulated.gift_subscription",
+            )
+            .with_metadata(
+                serde_json::json!({
+                    "total": 5
+                }),
+            )
+        }
+
+        "bits" => {
+            SdjfamEvent::new(
+                id,
+                Platform::Twitch,
+                EventType::Bits,
+            )
+            .with_user(user)
+            .with_message(
+                "Test Viewer heeft 100 bits gecheerd",
+            )
+            .with_amount(
+                EventAmount::new(
+                    100.0,
+                    Some("BITS".to_string()),
+                ),
+            )
+            .with_raw_event_type(
+                "simulated.bits",
+            )
+        }
+
+        "raid" => {
+            SdjfamEvent::new(
+                id,
+                Platform::Twitch,
+                EventType::Raid,
+            )
+            .with_user(user)
+            .with_message(
+                "Test Viewer raidt met 25 kijkers",
+            )
+            .with_raw_event_type(
+                "simulated.raid",
+            )
+            .with_metadata(
+                serde_json::json!({
+                    "viewers": 25
+                }),
+            )
+        }
+
+        _ => {
+            return Err(
+                format!(
+                    "Onbekend testevent: {}",
+                    event_type
+                ),
+            );
+        }
+    };
+
+    app.emit(
+        "sdjfam-event",
+        event.clone(),
+    )
+    .map_err(|error| {
+        error.to_string()
+    })?;
+
+    Ok(event)
+}
+
 #[cfg_attr(
     mobile,
     tauri::mobile_entry_point
@@ -3062,13 +3198,14 @@ pub fn run() {
         )
         .invoke_handler(
             tauri::generate_handler![
-                
-                event_engine_test,youtube_login,
+                event_engine_test,
+                event_engine_simulate,
+                youtube_login,
                 youtube_auth_status,
                 youtube_auto_connect,
                 youtube_start_chat_stream,
                 youtube_stop_chat_stream,
-                            youtube_viewer_count,
+                youtube_viewer_count,
                 twitch_start_eventsub,
                 twitch_stop_eventsub,
                 twitch_auth_status,

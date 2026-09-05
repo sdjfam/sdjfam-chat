@@ -89,17 +89,12 @@ type SdjfamEvent = {
   id: string;
   platform: Platform | "system";
   event_type: string;
-  user: { username: string | null; display_name: string | null } | null;
+  user: {
+    username: string | null;
+    display_name: string | null;
+  } | null;
   message: string | null;
 };
-
-// Serialize start/stop across effect cleanup, login and remounts.
-let twitchEventSubLifecycle: Promise<void> = Promise.resolve();
-
-function eventSubNeedsRelogin(status: TwitchEventSubStatus): boolean {
-  return status.status === "auth_error" || status.status === "revoked" ||
-    /ontbrekende rechten|scope|opnieuw.*koppel|koppel.*opnieuw|niet gekoppeld|nog niet gekoppeld|401|403/i.test(status.message);
-}
 
 type TwitchViewerResult = {
   connected: boolean;
@@ -114,6 +109,21 @@ type YouTubeViewerResult = {
   viewer_count: number | null;
   message: string;
 };
+
+// Serialize start/stop across effect cleanup, login and remounts.
+let twitchEventSubLifecycle: Promise<void> = Promise.resolve();
+
+function eventSubNeedsRelogin(
+  status: TwitchEventSubStatus
+): boolean {
+  return (
+    status.status === "auth_error" ||
+    status.status === "revoked" ||
+    /ontbrekende rechten|scope|opnieuw.*koppel|koppel.*opnieuw|niet gekoppeld|nog niet gekoppeld|401|403/i.test(
+      status.message
+    )
+  );
+}
 
 const TWITCH_CLIENT_ID =
   import.meta.env.VITE_TWITCH_CLIENT_ID?.trim() ?? "";
@@ -250,9 +260,29 @@ function App() {
     useState("");
 
   const [twitchEventSubStatus, setTwitchEventSubStatus] =
-    useState<TwitchEventSubStatus>({ status: "idle", message: "Twitch EventSub voorbereiden..." });
-  const [twitchEventSubGeneration, setTwitchEventSubGeneration] = useState(0);
-  const twitchEventIdsRef = useRef<Set<string>>(new Set());
+    useState<TwitchEventSubStatus>({
+      status: "idle",
+      message: "Twitch EventSub voorbereiden...",
+    });
+
+  const [
+    twitchEventSubGeneration,
+    setTwitchEventSubGeneration,
+  ] = useState(0);
+
+  const twitchEventIdsRef =
+    useRef<Set<string>>(new Set());
+
+  // Event Engine simulator
+  const [
+    eventSimulatorLoading,
+    setEventSimulatorLoading,
+  ] = useState<string | null>(null);
+
+  const [
+    eventSimulatorStatus,
+    setEventSimulatorStatus,
+  ] = useState("");
 
   // YouTube
   const [youtubeConnected, setYoutubeConnected] =
@@ -307,9 +337,7 @@ function App() {
     useState("");
 
   const updateRef =
-    useRef<
-      Awaited<ReturnType<typeof check>>
-    >(null);
+    useRef<Awaited<ReturnType<typeof check>>>(null);
 
   const messageListRef =
     useRef<HTMLDivElement | null>(null);
@@ -726,61 +754,179 @@ function App() {
     };
   }, []);
 
+  // =========================================================
+  // TWITCH EVENTSUB
+  // =========================================================
+
   useEffect(() => {
     let cancelled = false;
     const unlisteners: UnlistenFn[] = [];
     let startAttempted = false;
 
     const setup = async () => {
-      if (cancelled) return;
-      if (!TWITCH_CLIENT_ID) {
-        setTwitchEventSubStatus({ status: "error", message: "Twitch EventSub kan niet starten: VITE_TWITCH_CLIENT_ID ontbreekt in deze build." });
+      if (cancelled) {
         return;
       }
+
+      if (!TWITCH_CLIENT_ID) {
+        setTwitchEventSubStatus({
+          status: "error",
+          message:
+            "Twitch EventSub kan niet starten: VITE_TWITCH_CLIENT_ID ontbreekt in deze build.",
+        });
+
+        return;
+      }
+
       try {
-        const statusUnlisten = await listen<TwitchEventSubStatus>("twitch-eventsub-status", ({ payload }) => {
-          if (!cancelled) setTwitchEventSubStatus(payload);
-        });
-        if (cancelled) { statusUnlisten(); return; }
-        unlisteners.push(statusUnlisten);
+        const statusUnlisten =
+          await listen<TwitchEventSubStatus>(
+            "twitch-eventsub-status",
+            ({ payload }) => {
+              if (!cancelled) {
+                setTwitchEventSubStatus(
+                  payload
+                );
+              }
+            }
+          );
 
-        const eventUnlisten = await listen<SdjfamEvent>("sdjfam-event", ({ payload }) => {
-          if (cancelled || payload.platform !== "twitch" || payload.event_type === "chat_message") return;
-          const ids = twitchEventIdsRef.current;
-          if (ids.has(payload.id)) return;
-          ids.add(payload.id);
-          if (ids.size > 1000) ids.delete(ids.values().next().value!);
-          setMessages((current) => [...current, {
-            id: `eventsub:${payload.id}`,
-            platform: "twitch",
-            username: payload.user?.display_name || payload.user?.username || "Twitch",
-            message: payload.message || `Twitch-event: ${payload.event_type}`,
-          }]);
-        });
-        if (cancelled) { eventUnlisten(); return; }
-        unlisteners.push(eventUnlisten);
+        if (cancelled) {
+          statusUnlisten();
+          return;
+        }
 
-        setTwitchEventSubStatus({ status: "connecting", message: "Twitch EventSub starten..." });
+        unlisteners.push(
+          statusUnlisten
+        );
+
+        const eventUnlisten =
+          await listen<SdjfamEvent>(
+            "sdjfam-event",
+            ({ payload }) => {
+              if (
+                cancelled ||
+                payload.platform !==
+                  "twitch" ||
+                payload.event_type ===
+                  "chat_message"
+              ) {
+                return;
+              }
+
+              const ids =
+                twitchEventIdsRef.current;
+
+              if (ids.has(payload.id)) {
+                return;
+              }
+
+              ids.add(payload.id);
+
+              if (ids.size > 1000) {
+                const firstId =
+                  ids.values().next().value;
+
+                if (firstId) {
+                  ids.delete(firstId);
+                }
+              }
+
+              setMessages(
+                (current) => [
+                  ...current,
+                  {
+                    id:
+                      `eventsub:${payload.id}`,
+                    platform:
+                      "twitch",
+                    username:
+                      payload.user
+                        ?.display_name ||
+                      payload.user
+                        ?.username ||
+                      "Twitch",
+                    message:
+                      payload.message ||
+                      `Twitch-event: ${payload.event_type}`,
+                  },
+                ]
+              );
+            }
+          );
+
+        if (cancelled) {
+          eventUnlisten();
+          return;
+        }
+
+        unlisteners.push(
+          eventUnlisten
+        );
+
+        setTwitchEventSubStatus({
+          status: "connecting",
+          message:
+            "Twitch EventSub starten...",
+        });
+
         startAttempted = true;
-        // Only the backend's connected event confirms active subscriptions.
-        await invoke("twitch_start_eventsub", { clientId: TWITCH_CLIENT_ID });
+
+        await invoke(
+          "twitch_start_eventsub",
+          {
+            clientId:
+              TWITCH_CLIENT_ID,
+          }
+        );
       } catch (error) {
-        if (!cancelled) setTwitchEventSubStatus({ status: "error", message: String(error) });
-        unlisteners.splice(0).forEach((unlisten) => unlisten());
+        if (!cancelled) {
+          setTwitchEventSubStatus({
+            status: "error",
+            message:
+              String(error),
+          });
+        }
+
+        unlisteners
+          .splice(0)
+          .forEach(
+            (unlisten) =>
+              unlisten()
+          );
       }
     };
 
-    twitchEventSubLifecycle = twitchEventSubLifecycle.then(setup);
+    twitchEventSubLifecycle =
+      twitchEventSubLifecycle.then(
+        setup
+      );
+
     return () => {
       cancelled = true;
-      unlisteners.splice(0).forEach((unlisten) => unlisten());
-      twitchEventSubLifecycle = twitchEventSubLifecycle.then(async () => {
-        if (startAttempted) {
-          await invoke("twitch_stop_eventsub").catch((error) => {
-            console.warn("Twitch EventSub stoppen mislukt:", error);
-          });
-        }
-      });
+
+      unlisteners
+        .splice(0)
+        .forEach(
+          (unlisten) =>
+            unlisten()
+        );
+
+      twitchEventSubLifecycle =
+        twitchEventSubLifecycle.then(
+          async () => {
+            if (startAttempted) {
+              await invoke(
+                "twitch_stop_eventsub"
+              ).catch((error) => {
+                console.warn(
+                  "Twitch EventSub stoppen mislukt:",
+                  error
+                );
+              });
+            }
+          }
+        );
     };
   }, [twitchEventSubGeneration]);
 
@@ -813,8 +959,12 @@ function App() {
       );
 
       if (result.connected) {
-        setTwitchEventSubGeneration((generation) => generation + 1);
+        setTwitchEventSubGeneration(
+          (generation) =>
+            generation + 1
+        );
       }
+
       await refreshTwitchAuthStatus();
       await refreshTwitchViewerCount();
     } catch (error) {
@@ -824,12 +974,59 @@ function App() {
       );
 
       setTwitchOauthStatus(
-        `Twitch koppelen mislukt: ${String(error)}`
+        `Twitch koppelen mislukt: ${String(
+          error
+        )}`
       );
 
       await refreshTwitchAuthStatus();
     } finally {
       setTwitchOauthLoading(false);
+    }
+  }
+
+  // =========================================================
+  // SDJFAM EVENT ENGINE SIMULATOR
+  // =========================================================
+
+  async function handleSimulateEvent(
+    eventType: string
+  ) {
+    if (eventSimulatorLoading) {
+      return;
+    }
+
+    try {
+      setEventSimulatorLoading(
+        eventType
+      );
+
+      setEventSimulatorStatus(
+        `Testevent ${eventType} versturen...`
+      );
+
+      const result =
+        await invoke<SdjfamEvent>(
+          "event_engine_simulate",
+          {
+            eventType,
+          }
+        );
+
+      setEventSimulatorStatus(
+        `Testevent ontvangen: ${result.event_type}`
+      );
+    } catch (error) {
+      console.error(
+        "Event Engine simulator fout:",
+        error
+      );
+
+      setEventSimulatorStatus(
+        `Simulator fout: ${String(error)}`
+      );
+    } finally {
+      setEventSimulatorLoading(null);
     }
   }
 
@@ -1763,22 +1960,180 @@ function App() {
                 </div>
               </div>
 
-              <div className="settings-status-card" role="status">
+              <div
+                className="settings-status-card"
+                role="status"
+              >
                 <div className="settings-status-line">
-                  <span>EventSub</span>
-                  <strong className={twitchEventSubStatus.status === "connected" ? "status-good" : "status-muted"}>
-                    {twitchEventSubStatus.status === "connected" ? "Actief"
-                      : eventSubNeedsRelogin(twitchEventSubStatus) ? "Opnieuw koppelen"
-                      : ["connecting", "socket_connected"].includes(twitchEventSubStatus.status) ? "Verbinden..."
-                      : twitchEventSubStatus.status === "reconnecting" ? "Opnieuw verbinden..."
-                      : "Niet actief"}
+                  <span>
+                    EventSub
+                  </span>
+
+                  <strong
+                    className={
+                      twitchEventSubStatus.status ===
+                      "connected"
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {twitchEventSubStatus.status ===
+                    "connected"
+                      ? "Actief"
+                      : eventSubNeedsRelogin(
+                            twitchEventSubStatus
+                          )
+                        ? "Opnieuw koppelen"
+                        : [
+                              "connecting",
+                              "socket_connected",
+                            ].includes(
+                              twitchEventSubStatus.status
+                            )
+                          ? "Verbinden..."
+                          : twitchEventSubStatus.status ===
+                              "reconnecting"
+                            ? "Opnieuw verbinden..."
+                            : "Niet actief"}
                   </strong>
                 </div>
-                <p className="settings-message">{twitchEventSubStatus.message}</p>
-                {eventSubNeedsRelogin(twitchEventSubStatus) && (
+
+                <p className="settings-message">
+                  {twitchEventSubStatus.message}
+                </p>
+
+                {eventSubNeedsRelogin(
+                  twitchEventSubStatus
+                ) && (
                   <p className="settings-message">
-                    Klik hieronder op Twitch opnieuw koppelen en geef toestemming voor de EventSub-rechten
-                    (volgers, abonnementen en bits). EventSub start daarna automatisch opnieuw.
+                    Klik hieronder op Twitch opnieuw
+                    koppelen en geef toestemming voor de
+                    EventSub-rechten (volgers,
+                    abonnementen en bits). EventSub start
+                    daarna automatisch opnieuw.
+                  </p>
+                )}
+              </div>
+
+              <div className="settings-status-card">
+                <div className="settings-status-line">
+                  <span>
+                    Event Engine Simulator
+                  </span>
+
+                  <strong className="status-good">
+                    Testmodus
+                  </strong>
+                </div>
+
+                <p className="settings-message">
+                  Test Twitch-events lokaal via dezelfde
+                  SDJFAM Event Engine die echte
+                  EventSub-events verwerkt.
+                </p>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                    marginTop: "12px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="twitch-link-button"
+                    disabled={
+                      eventSimulatorLoading !== null
+                    }
+                    onClick={() =>
+                      void handleSimulateEvent(
+                        "follow"
+                      )
+                    }
+                  >
+                    {eventSimulatorLoading ===
+                    "follow"
+                      ? "Testen..."
+                      : "Test Follow"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="twitch-link-button"
+                    disabled={
+                      eventSimulatorLoading !== null
+                    }
+                    onClick={() =>
+                      void handleSimulateEvent(
+                        "subscription"
+                      )
+                    }
+                  >
+                    {eventSimulatorLoading ===
+                    "subscription"
+                      ? "Testen..."
+                      : "Test Sub"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="twitch-link-button"
+                    disabled={
+                      eventSimulatorLoading !== null
+                    }
+                    onClick={() =>
+                      void handleSimulateEvent(
+                        "gift_subscription"
+                      )
+                    }
+                  >
+                    {eventSimulatorLoading ===
+                    "gift_subscription"
+                      ? "Testen..."
+                      : "Test Gift Sub"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="twitch-link-button"
+                    disabled={
+                      eventSimulatorLoading !== null
+                    }
+                    onClick={() =>
+                      void handleSimulateEvent(
+                        "bits"
+                      )
+                    }
+                  >
+                    {eventSimulatorLoading ===
+                    "bits"
+                      ? "Testen..."
+                      : "Test Bits"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="twitch-link-button"
+                    disabled={
+                      eventSimulatorLoading !== null
+                    }
+                    onClick={() =>
+                      void handleSimulateEvent(
+                        "raid"
+                      )
+                    }
+                  >
+                    {eventSimulatorLoading ===
+                    "raid"
+                      ? "Testen..."
+                      : "Test Raid"}
+                  </button>
+                </div>
+
+                {eventSimulatorStatus && (
+                  <p className="settings-message">
+                    {eventSimulatorStatus}
                   </p>
                 )}
               </div>
@@ -1808,7 +2163,10 @@ function App() {
               >
                 {twitchOauthLoading
                   ? "Twitch koppelen..."
-                  : twitchAuthStatus?.connected || eventSubNeedsRelogin(twitchEventSubStatus)
+                  : twitchAuthStatus?.connected ||
+                      eventSubNeedsRelogin(
+                        twitchEventSubStatus
+                      )
                     ? "Twitch opnieuw koppelen"
                     : "Twitch koppelen"}
               </button>
