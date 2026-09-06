@@ -380,6 +380,12 @@ function App() {
   const [updateStatus, setUpdateStatus] =
     useState("");
 
+  const [updateNotes, setUpdateNotes] =
+    useState("");
+
+  const [updatePopupOpen, setUpdatePopupOpen] =
+    useState(false);
+
   const updateRef =
     useRef<Awaited<ReturnType<typeof check>>>(null);
 
@@ -407,12 +413,26 @@ function App() {
         if (!update) {
           updateRef.current = null;
           setUpdateVersion(null);
+          setUpdateNotes("");
+          setUpdatePopupOpen(false);
           setUpdateStatus("");
           return;
         }
 
         updateRef.current = update;
         setUpdateVersion(update.version);
+
+        const notes =
+          typeof update.body === "string"
+            ? update.body.trim()
+            : "";
+
+        setUpdateNotes(
+          notes ||
+            "Deze update bevat verbeteringen en bugfixes."
+        );
+
+        setUpdatePopupOpen(true);
 
         setUpdateStatus(
           `Versie ${update.version} is beschikbaar`
@@ -1667,7 +1687,70 @@ function App() {
         event={activeAlert}
       />
 
-      <header className="topbar">
+      {updatePopupOpen && updateVersion && (
+      <div
+        className="update-popup-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="update-popup-title"
+      >
+        <div className="update-popup">
+          <div className="update-popup-label">
+            SDJFAM CHAT UPDATE
+          </div>
+
+          <h2 id="update-popup-title">
+            Nieuwe update beschikbaar
+          </h2>
+
+          <p className="update-popup-version">
+            Versie {updateVersion} staat klaar.
+          </p>
+
+          <div className="update-popup-notes">
+            <strong>Wat is er nieuw?</strong>
+
+            <div>
+              {updateNotes}
+            </div>
+          </div>
+
+          {updateInstalling && updateStatus && (
+            <p className="update-popup-status">
+              {updateStatus}
+            </p>
+          )}
+
+          <div className="update-popup-actions">
+            <button
+              type="button"
+              className="update-popup-later"
+              onClick={() =>
+                setUpdatePopupOpen(false)
+              }
+              disabled={updateInstalling}
+            >
+              Later
+            </button>
+
+            <button
+              type="button"
+              className="update-popup-now"
+              onClick={() =>
+                void handleInstallUpdate()
+              }
+              disabled={updateInstalling}
+            >
+              {updateInstalling
+                ? "Update installeren..."
+                : "Nu updaten"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <header className="topbar">
         <div className="topbar-brand">
           <h1>
             SDJFAM Chat

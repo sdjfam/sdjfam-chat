@@ -62,7 +62,13 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "SDJFAM Chat v__VERSION__"
-          releaseBody: "Nieuwe versie van SDJFAM Chat."
+          releaseBody: |
+            Nieuw in SDJFAM Chat v0.1.4:
+
+            - Nieuwe update-popup
+            - Bekijk wat er nieuw is voordat je installeert
+            - Kies tussen Later en Nu updaten
+            - Verbeterde update-ervaring
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
