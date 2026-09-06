@@ -1,6 +1,6 @@
 {
   "productName": "SDJFAM Chat",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "identifier": "com.sdjde.sdjfam-chat",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -24,6 +24,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/tiktok-chat-helper"
+   ],
     "resources": [
       "../youtube-oauth.json"
     ],

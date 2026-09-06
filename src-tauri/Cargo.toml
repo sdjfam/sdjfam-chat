@@ -1,6 +1,6 @@
 [package]
 name = "sdjfam-chat"
-version = "0.1.2"
+version = "0.1.5"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -36,4 +36,5 @@ prost-types = "0.14.4"
 tauri-plugin-updater = "2.11.0"
 futures-util = "0.3.34"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
+tauri-plugin-shell = "2.3.6"
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
+import { Command, type Child } from "@tauri-apps/plugin-shell";
 import tmi from "tmi.js";
 
 import AlertOverlay from "./alerts/AlertOverlay";
@@ -133,6 +134,7 @@ const TWITCH_CLIENT_ID =
   import.meta.env.VITE_TWITCH_CLIENT_ID?.trim() ?? "";
 
 const TWITCH_CHANNEL = "sdjfam";
+const TIKTOK_USERNAME = "sdjfam1";
 
 const ALERT_EVENT_TYPES = new Set([
   "follow",
@@ -342,6 +344,16 @@ function App() {
     eventSimulatorStatus,
     setEventSimulatorStatus,
   ] = useState("");
+
+  // TikTok
+  const [tiktokConnected, setTikTokConnected] =
+    useState(false);
+
+  const [tiktokViewerCount, setTikTokViewerCount] =
+    useState<number | null>(null);
+
+  const tiktokChildRef =
+    useRef<Child | null>(null);
 
   // YouTube
   const [youtubeConnected, setYoutubeConnected] =
@@ -903,8 +915,6 @@ function App() {
                 }
               }
 
-              // Alle ondersteunde Twitch alert-events
-              // lopen nu door dezelfde alert-route.
               if (
                 ALERT_EVENT_TYPES.has(
                   payload.event_type
@@ -1194,6 +1204,199 @@ function App() {
       client
         .disconnect()
         .catch(() => {});
+    };
+  }, []);
+
+  // =========================================================
+  // TIKTOK LIVE CHAT + VIEWERS
+  // =========================================================
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const command = Command.sidecar(
+      "binaries/tiktok-chat-helper",
+      [TIKTOK_USERNAME]
+    );
+
+    command.stdout.on("data", (line) => {
+      if (cancelled) {
+        return;
+      }
+
+      const output = line.trim();
+
+      if (!output) {
+        return;
+      }
+
+      if (
+        output.startsWith("TIKTOK_CONNECTED") ||
+        output.startsWith("TikTok LIVE actief")
+      ) {
+        setTikTokConnected(true);
+        return;
+      }
+
+      if (output === "TIKTOK_DISCONNECTED") {
+        setTikTokConnected(false);
+        setTikTokViewerCount(null);
+        return;
+      }
+
+      if (!output.startsWith("{")) {
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(output) as {
+          type?: string;
+          platform?: string;
+          username?: string;
+          uniqueId?: string;
+          message?: string;
+          count?: number;
+        };
+
+        if (
+          payload.type === "viewerCount" &&
+          payload.platform === "tiktok" &&
+          typeof payload.count === "number" &&
+          Number.isFinite(payload.count)
+        ) {
+          setTikTokConnected(true);
+
+          setTikTokViewerCount(
+            Math.max(
+              0,
+              Math.trunc(payload.count)
+            )
+          );
+
+          return;
+        }
+
+        if (
+          payload.type !== "chat" ||
+          payload.platform !== "tiktok"
+        ) {
+          return;
+        }
+
+        const message =
+          payload.message?.trim() ?? "";
+
+        if (!message) {
+          return;
+        }
+
+        setTikTokConnected(true);
+
+        setMessages(
+          (current) => [
+            ...current,
+            {
+              id:
+                `tiktok-${Date.now()}-${Math.random()}`,
+              platform: "tiktok",
+              username:
+                payload.username?.trim() ||
+                payload.uniqueId?.trim() ||
+                "TikTok",
+              message,
+            },
+          ]
+        );
+      } catch (error) {
+        console.warn(
+          "TikTok chatregel kon niet worden gelezen:",
+          error,
+          output
+        );
+      }
+    });
+
+    command.stderr.on("data", (line) => {
+      if (cancelled) {
+        return;
+      }
+
+      console.warn(
+        "TikTok sidecar:",
+        line
+      );
+
+      if (
+        line.includes("isn't online") ||
+        line.includes("verbinden mislukt") ||
+        line.includes("TIKTOK_ERROR")
+      ) {
+        setTikTokConnected(false);
+        setTikTokViewerCount(null);
+      }
+    });
+
+    command.on("close", () => {
+      if (!cancelled) {
+        setTikTokConnected(false);
+        setTikTokViewerCount(null);
+      }
+
+      tiktokChildRef.current = null;
+    });
+
+    command.on("error", (error) => {
+      if (cancelled) {
+        return;
+      }
+
+      console.error(
+        "TikTok sidecar fout:",
+        error
+      );
+
+      setTikTokConnected(false);
+      setTikTokViewerCount(null);
+    });
+
+    command
+      .spawn()
+      .then((child) => {
+        if (cancelled) {
+          void child.kill().catch(() => {});
+          return;
+        }
+
+        tiktokChildRef.current = child;
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        console.error(
+          "TikTok sidecar kon niet starten:",
+          error
+        );
+
+        setTikTokConnected(false);
+        setTikTokViewerCount(null);
+      });
+
+    return () => {
+      cancelled = true;
+
+      setTikTokConnected(false);
+      setTikTokViewerCount(null);
+
+      const child =
+        tiktokChildRef.current;
+
+      tiktokChildRef.current = null;
+
+      if (child) {
+        void child.kill().catch(() => {});
+      }
     };
   }, []);
 
@@ -1711,76 +1914,76 @@ function App() {
       />
 
       {updatePopupOpen && updateVersion && (
-      <div
-        className="update-popup-backdrop"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="update-popup-title"
-      >
-        <div className="update-popup">
-          <div className="update-popup-label">
-            SDJFAM CHAT UPDATE
-          </div>
+        <div
+          className="update-popup-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="update-popup-title"
+        >
+          <div className="update-popup">
+            <div className="update-popup-label">
+              SDJFAM CHAT UPDATE
+            </div>
 
-          <h2 id="update-popup-title">
-            Nieuwe update beschikbaar
-          </h2>
+            <h2 id="update-popup-title">
+              Nieuwe update beschikbaar
+            </h2>
 
-          <p className="update-popup-version">
-            Versie {updateVersion} staat klaar.
-          </p>
+            <p className="update-popup-version">
+              Versie {updateVersion} staat klaar.
+            </p>
 
-          <div className="update-popup-notes">
-            <strong>Wat is er nieuw?</strong>
+            <div className="update-popup-notes">
+              <strong>Wat is er nieuw?</strong>
 
-            <div>
-              {updateNotes}
+              <div>
+                {updateNotes}
+              </div>
+            </div>
+
+            {updateInstalling && updateStatus && (
+              <p className="update-popup-status">
+                {updateStatus}
+              </p>
+            )}
+
+            <div className="update-popup-actions">
+              <button
+                type="button"
+                className="update-popup-later"
+                onClick={() =>
+                  setUpdatePopupOpen(false)
+                }
+                disabled={updateInstalling}
+              >
+                Later
+              </button>
+
+              <button
+                type="button"
+                className="update-popup-now"
+                onClick={() =>
+                  void handleInstallUpdate()
+                }
+                disabled={updateInstalling}
+              >
+                {updateInstalling
+                  ? "Update installeren..."
+                  : "Nu updaten"}
+              </button>
             </div>
           </div>
-
-          {updateInstalling && updateStatus && (
-            <p className="update-popup-status">
-              {updateStatus}
-            </p>
-          )}
-
-          <div className="update-popup-actions">
-            <button
-              type="button"
-              className="update-popup-later"
-              onClick={() =>
-                setUpdatePopupOpen(false)
-              }
-              disabled={updateInstalling}
-            >
-              Later
-            </button>
-
-            <button
-              type="button"
-              className="update-popup-now"
-              onClick={() =>
-                void handleInstallUpdate()
-              }
-              disabled={updateInstalling}
-            >
-              {updateInstalling
-                ? "Update installeren..."
-                : "Nu updaten"}
-            </button>
-          </div>
         </div>
-      </div>
-    )}
+      )}
 
-    <header className="topbar">
+      <header className="topbar">
         <div className="topbar-brand">
           <h1>
             SDJFAM Chat
           </h1>
 
           <p>
-            Twitch + YouTube live chat
+            Twitch + YouTube + TikTok live chat
           </p>
 
           {updateStatus && (
@@ -1876,6 +2079,39 @@ function App() {
             </div>
           </div>
 
+          <div
+            className={`platform-viewer tiktok ${
+              tiktokConnected
+                ? "connected"
+                : "offline"
+            }`}
+            title={
+              tiktokConnected
+                ? `TikTok @${TIKTOK_USERNAME} LIVE verbonden`
+                : `TikTok @${TIKTOK_USERNAME} offline`
+            }
+          >
+            <div className="platform-status">
+              <TikTokIcon />
+            </div>
+
+            <div className="viewer-count">
+              <span
+                className="viewer-eye"
+                aria-hidden="true"
+              >
+                👁
+              </span>
+
+              <strong>
+                {tiktokConnected &&
+                tiktokViewerCount !== null
+                  ? tiktokViewerCount.toLocaleString()
+                  : "—"}
+              </strong>
+            </div>
+          </div>
+
           <button
             type="button"
             className={`settings-button ${
@@ -1907,7 +2143,7 @@ function App() {
             </h2>
 
             <p>
-              {twitchConnected
+              {twitchConnected || tiktokConnected
                 ? `Nieuwe berichten verschijnen hier. ${youtubeStatus}`
                 : "Even wachten terwijl SDJFAM Chat verbinding maakt."}
             </p>
@@ -2091,19 +2327,6 @@ function App() {
                         ? "Verlopen"
                         : "Gekoppeld"
                       : "Niet gekoppeld"}
-                  </strong>
-                </div>
-
-                <div className="settings-status-line">
-                  <span>
-                    Kijkers
-                  </span>
-
-                  <strong>
-                    {twitchViewerLive &&
-                    twitchViewerCount !== null
-                      ? twitchViewerCount.toLocaleString()
-                      : "—"}
                   </strong>
                 </div>
               </div>
@@ -2409,19 +2632,6 @@ function App() {
                       : "Offline"}
                   </strong>
                 </div>
-
-                <div className="settings-status-line">
-                  <span>
-                    Kijkers
-                  </span>
-
-                  <strong>
-                    {youtubeViewerLive &&
-                    youtubeViewerCount !== null
-                      ? youtubeViewerCount.toLocaleString()
-                      : "—"}
-                  </strong>
-                </div>
               </div>
 
               <div className="settings-detail">
@@ -2495,6 +2705,102 @@ function App() {
                         ? "YouTube opnieuw koppelen"
                         : "YouTube koppelen"}
               </button>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-section-title">
+                <div className="settings-tiktok-icon">
+                  <TikTokIcon />
+                </div>
+
+                <div>
+                  <h3>
+                    TikTok
+                  </h3>
+
+                  <p>
+                    LIVE chat via TikTok sidecar
+                  </p>
+                </div>
+              </div>
+
+              <div className="settings-status-card">
+                <div className="settings-status-line">
+                  <span>
+                    Account
+                  </span>
+
+                  <strong>
+                    @{TIKTOK_USERNAME}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>
+                    Livechat
+                  </span>
+
+                  <strong
+                    className={
+                      tiktokConnected
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {tiktokConnected
+                      ? "Verbonden"
+                      : "Niet verbonden"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>
+                    Livestream
+                  </span>
+
+                  <strong
+                    className={
+                      tiktokConnected
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {tiktokConnected
+                      ? "Live"
+                      : "Offline"}
+                  </strong>
+                </div>
+
+                <div className="settings-status-line">
+                  <span>
+                    Chat helper
+                  </span>
+
+                  <strong
+                    className={
+                      tiktokConnected
+                        ? "status-good"
+                        : "status-muted"
+                    }
+                  >
+                    {tiktokConnected
+                      ? "Actief"
+                      : "Wachten op LIVE"}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="settings-detail">
+                <span>
+                  Verbinding
+                </span>
+
+                <p>
+                  {tiktokConnected
+                    ? `TikTok LIVE @${TIKTOK_USERNAME} is verbonden. Nieuwe chatberichten verschijnen automatisch in SDJFAM Chat.`
+                    : `SDJFAM Chat wacht op een actieve TikTok LIVE van @${TIKTOK_USERNAME}.`}
+                </p>
+              </div>
             </div>
           </aside>
         </div>

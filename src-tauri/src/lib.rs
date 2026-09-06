@@ -1,4 +1,4 @@
-﻿const TWITCH_EVENTSUB_SCOPES: &str = "moderator:read:followers channel:read:subscriptions bits:read";
+const TWITCH_EVENTSUB_SCOPES: &str = "moderator:read:followers channel:read:subscriptions bits:read";
 pub mod youtube_api {
     tonic::include_proto!("youtube.api.v3");
 }
@@ -3192,6 +3192,7 @@ pub fn run() {
         .plugin(
             tauri_plugin_opener::init(),
         )
+        .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_updater::Builder::new()
                 .build(),
