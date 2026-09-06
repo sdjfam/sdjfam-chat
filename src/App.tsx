@@ -267,6 +267,9 @@ function App() {
   const [activeAlert, setActiveAlert] =
     useState<SdjfamEvent | null>(null);
 
+  const [alertQueue, setAlertQueue] =
+    useState<SdjfamEvent[]>([]);
+
   useEffect(() => {
     if (!activeAlert) {
       return;
@@ -280,6 +283,21 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [activeAlert]);
+
+  useEffect(() => {
+    if (activeAlert || alertQueue.length === 0) {
+      return;
+    }
+
+    const nextAlert = alertQueue[0];
+
+    setActiveAlert(nextAlert);
+
+    setAlertQueue(
+      (currentQueue) =>
+        currentQueue.slice(1)
+    );
+  }, [activeAlert, alertQueue]);
 
   // Twitch
   const [twitchConnected, setTwitchConnected] =
@@ -892,7 +910,12 @@ function App() {
                   payload.event_type
                 )
               ) {
-                setActiveAlert(payload);
+                setAlertQueue(
+                  (currentQueue) => [
+                    ...currentQueue,
+                    payload,
+                  ]
+                );
               }
 
               setMessages(
