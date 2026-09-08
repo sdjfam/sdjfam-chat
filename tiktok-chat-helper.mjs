@@ -63,7 +63,9 @@ connection.on(WebcastEvent.ROOM_USER, (data) => {
   );
 
   if (!Number.isFinite(viewerCount)) {
-    console.log("TIKTOK_ROOM_USER invalid viewerCount");
+    console.log(
+      "TIKTOK_ROOM_USER invalid viewerCount"
+    );
     return;
   }
 
@@ -71,14 +73,74 @@ connection.on(WebcastEvent.ROOM_USER, (data) => {
     JSON.stringify({
       type: "viewerCount",
       platform: "tiktok",
-      count: Math.max(0, Math.trunc(viewerCount)),
+      count: Math.max(
+        0,
+        Math.trunc(viewerCount)
+      ),
     })
   );
 });
 
-connection.on(WebcastEvent.DISCONNECTED, () => {
-  console.log("TIKTOK_DISCONNECTED");
+connection.on(WebcastEvent.GIFT, (data) => {
+  const giftName =
+    data.giftName ||
+    data.giftDetails?.giftName ||
+    "TikTok Gift";
+
+  const giftId =
+    data.giftId ??
+    data.giftDetails?.giftId ??
+    null;
+
+  const repeatCount = Math.max(
+    1,
+    Number(data.repeatCount) || 1
+  );
+
+  const rawDiamondCount =
+    data.diamondCount ??
+    data.giftDetails?.diamondCount ??
+    null;
+
+  const parsedDiamondCount =
+    rawDiamondCount === null
+      ? null
+      : Number(rawDiamondCount);
+
+  const diamondCount =
+    parsedDiamondCount !== null &&
+    Number.isFinite(parsedDiamondCount)
+      ? parsedDiamondCount
+      : null;
+
+  const username =
+    data.nickname ||
+    data.uniqueId ||
+    "TikTok Viewer";
+
+  console.log(
+    JSON.stringify({
+      type: "gift",
+      platform: "tiktok",
+      username,
+      uniqueId:
+        data.uniqueId || null,
+      giftName,
+      giftId,
+      repeatCount,
+      diamondCount,
+    })
+  );
 });
+
+connection.on(
+  WebcastEvent.DISCONNECTED,
+  () => {
+    console.log(
+      "TIKTOK_DISCONNECTED"
+    );
+  }
+);
 
 connection.on(WebcastEvent.ERROR, (error) => {
   console.error(

@@ -391,6 +391,12 @@ function App() {
   ] =
     useState<SdjfamEvent[]>([]);
 
+  const [
+    alertHistory,
+    setAlertHistory,
+  ] =
+    useState<SdjfamEvent[]>([]);
+
   // =======================================================
   // TWITCH STATE
   // =======================================================
@@ -631,46 +637,72 @@ function App() {
     youtubeConnected ||
     youtubeViewerLive;
 
-  // =======================================================
-  // ALERT QUEUE
-  // =======================================================
+ // =======================================================
+// ALERT QUEUE + HISTORY
+// =======================================================
 
-  useEffect(() => {
-    if (!activeAlert) {
-      return;
-    }
+const pushAlert = (
+  event: SdjfamEvent
+) => {
+  // Voeg het event toe aan de bestaande overlay-wachtrij.
+  setAlertQueue(
+    (currentQueue) => [
+      ...currentQueue,
+      event,
+    ]
+  );
 
-    const timer =
-      window.setTimeout(() => {
-        setActiveAlert(null);
-      }, 5000);
+  // Bewaar het event ook in de zichtbare Alerts & Gifts-history.
+  // Nieuwste event staat bovenaan.
+  // Maximaal 100 events bewaren.
+  setAlertHistory(
+    (currentHistory) => [
+      event,
+      ...currentHistory,
+    ].slice(0, 100)
+  );
+};
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [activeAlert]);
+// Toon een actieve alert maximaal 5 seconden.
+useEffect(() => {
+  if (!activeAlert) {
+    return;
+  }
 
-  useEffect(() => {
-    if (
-      activeAlert ||
-      alertQueue.length === 0
-    ) {
-      return;
-    }
+  const timer =
+    window.setTimeout(() => {
+      setActiveAlert(null);
+    }, 5000);
 
-    const nextAlert =
-      alertQueue[0];
+  return () => {
+    window.clearTimeout(timer);
+  };
+}, [activeAlert]);
 
-    setActiveAlert(nextAlert);
+// Pak automatisch het volgende event uit de overlay-wachtrij.
+useEffect(() => {
+  if (
+    activeAlert ||
+    alertQueue.length === 0
+  ) {
+    return;
+  }
 
-    setAlertQueue(
-      (currentQueue) =>
-        currentQueue.slice(1)
-    );
-  }, [
-    activeAlert,
-    alertQueue,
-  ]);
+  const nextAlert =
+    alertQueue[0];
+
+  setActiveAlert(
+    nextAlert
+  );
+
+  setAlertQueue(
+    (currentQueue) =>
+      currentQueue.slice(1)
+  );
+}, [
+  activeAlert,
+  alertQueue,
+]);
 
   // =======================================================
   // DIAGNOSTIC LIVE SNAPSHOT
@@ -2281,15 +2313,10 @@ function App() {
                     }
                   );
 
-                  setAlertQueue(
-                    (
-                      currentQueue
-                    ) => [
-                      ...currentQueue,
-                      payload,
-                    ]
-                  );
-                }
+              pushAlert(
+                payload
+              );
+            }
 
                 setMessages(
                   (current) => [
@@ -2985,41 +3012,81 @@ function App() {
             return;
           }
 
-          // -----------------------------------------------
-          // FUTURE TIKTOK GIFTS
-          // -----------------------------------------------
+// =======================================================
+// TIKTOK GIFTS
+// =======================================================
 
-          if (
-            payload.type ===
-              "gift" &&
-            payload.platform ===
-              "tiktok"
-          ) {
-            recordDiagnosticEvent(
-              "tiktok",
-              "gift",
-              {
-                gift:
-                  payload.giftName ??
-                  "unknown",
+if (
+  payload.type === "gift" &&
+  payload.platform === "tiktok"
+) {
+  const repeatCount =
+    Math.max(
+      1,
+      payload.repeatCount ?? 1
+    );
 
-                gift_id:
-                  payload.giftId ??
-                  null,
+  const giftName =
+    payload.giftName ??
+    "TikTok Gift";
 
-                count:
-                  payload.repeatCount ??
-                  1,
+  recordDiagnosticEvent(
+    "tiktok",
+    "gift",
+    {
+      gift: giftName,
+      gift_id:
+        payload.giftId ?? null,
+      count: repeatCount,
+      diamonds:
+        payload.diamondCount ?? null,
+    }
+  );
 
-                diamonds:
-                  payload.diamondCount ??
-                  null,
-              }
-            );
+  const giftEvent: SdjfamEvent = {
+    id:
+      `tiktok-gift-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`,
+    platform: "tiktok",
+    event_type: "gift",
+    user: {
+      id:
+        payload.uniqueId ?? null,
+      username:
+        payload.uniqueId ??
+        payload.username ??
+        null,
+      display_name:
+        payload.username ??
+        payload.uniqueId ??
+        "TikTok Viewer",
+    },
+    message:
+      repeatCount > 1
+        ? `${giftName} x${repeatCount}`
+        : giftName,
+    amount: null,
+    raw_event_type:
+      "tiktok_gift",
+    metadata: {
+      gift_name:
+        giftName,
+      gift_id:
+        payload.giftId ?? null,
+      repeat_count:
+        repeatCount,
+      diamond_count:
+        payload.diamondCount ?? null,
+    },
+  };
 
-            return;
-          }
+  pushAlert(
+    giftEvent
+  );
 
+  return;
+}
           // -----------------------------------------------
           // FUTURE GENERIC TIKTOK EVENTS
           // -----------------------------------------------
@@ -3797,88 +3864,162 @@ function App() {
         </div>
       </header>
 
-      {/* ===================================================
-          CHAT
-      =================================================== */}
+     {/* ===================================================
+CHAT + ALERTS & GIFTS
+=================================================== */}
 
-      <section className="chat-panel">
-        {messages.length === 0 ? (
-          <div className="empty-state">
-            <h2>
-              {twitchConnected
-                ? "Twitch chat verbonden"
-                : "Twitch chat verbinden..."}
-            </h2>
+<div className="main-content-layout">
+  {/* ===================================================
+  CHAT
+  =================================================== */}
 
-            <p>
-              {twitchConnected ||
-              tiktokConnected
-                ? `Nieuwe berichten verschijnen hier. ${youtubeStatus}`
-                : "Even wachten terwijl SDJFAM Chat verbinding maakt."}
-            </p>
+  <section className="chat-panel">
+    {messages.length === 0 ? (
+      <div className="empty-state">
+        <h2>
+          {twitchConnected
+            ? "Twitch chat verbonden"
+            : "Twitch chat verbinden..."}
+        </h2>
 
-            {oauthStatus && (
-              <p className="empty-oauth-status">
-                {oauthStatus}
-              </p>
-            )}
+        <p>
+          {twitchConnected ||
+          tiktokConnected
+            ? `Nieuwe berichten verschijnen hier. ${youtubeStatus}`
+            : "Even wachten terwijl SDJFAM Chat verbinding maakt."}
+        </p>
 
-            {youtubeTitle && (
-              <p className="empty-live-title">
-                Live:{" "}
-                {youtubeTitle}
-              </p>
-            )}
-
-            {youtubeVideoId && (
-              <p className="empty-video-id">
-                Video ID:{" "}
-                {youtubeVideoId}
-              </p>
-            )}
-          </div>
-        ) : (
-          <div
-            className="message-list"
-            ref={messageListRef}
-          >
-            {messages.map(
-              (chat) => (
-                <div
-                  className={`chat-message ${chat.platform}`}
-                  key={chat.id}
-                >
-                  <span
-                    className={`platform-badge ${chat.platform}-badge`}
-                    title={getPlatformLabel(
-                      chat.platform
-                    )}
-                    aria-label={getPlatformLabel(
-                      chat.platform
-                    )}
-                  >
-                    <PlatformIcon
-                      platform={
-                        chat.platform
-                      }
-                    />
-                  </span>
-
-                  <div className="message-content">
-                    <strong>
-                      {chat.username}
-                    </strong>
-
-                    <p>
-                      {chat.message}
-                    </p>
-                  </div>
-                </div>
-              )
-            )}
-          </div>
+        {oauthStatus && (
+          <p className="empty-oauth-status">
+            {oauthStatus}
+          </p>
         )}
-      </section>
+
+        {youtubeTitle && (
+          <p className="empty-live-title">
+            Live:{" "}
+            {youtubeTitle}
+          </p>
+        )}
+
+        {youtubeVideoId && (
+          <p className="empty-video-id">
+            Video ID:{" "}
+            {youtubeVideoId}
+          </p>
+        )}
+      </div>
+    ) : (
+      <div
+        className="message-list"
+        ref={messageListRef}
+      >
+        {messages.map(
+          (chat) => (
+            <div
+              className={`chat-message ${chat.platform}`}
+              key={chat.id}
+            >
+              <span
+                className={`platform-badge ${chat.platform}-badge`}
+                title={getPlatformLabel(
+                  chat.platform
+                )}
+                aria-label={getPlatformLabel(
+                  chat.platform
+                )}
+              >
+                <PlatformIcon
+                  platform={
+                    chat.platform
+                  }
+                />
+              </span>
+
+              <div className="message-content">
+                <strong>
+                  {chat.username}
+                </strong>
+
+                <p>
+                  {chat.message}
+                </p>
+              </div>
+            </div>
+          )
+        )}
+      </div>
+    )}
+  </section>
+
+  {/* ===================================================
+  ALERTS & GIFTS
+  =================================================== */}
+
+  <aside className="alerts-panel">
+    <div className="alerts-panel-header">
+      <div>
+        <span className="alerts-panel-eyebrow">
+          LIVE EVENTS
+        </span>
+
+        <h2>
+          Alerts & Gifts
+        </h2>
+      </div>
+
+      <span className="alerts-panel-count">
+        {alertHistory.length}
+      </span>
+    </div>
+
+    {alertHistory.length === 0 ? (
+      <div className="alerts-empty-state">
+        <strong>
+          Nog geen alerts
+        </strong>
+
+        <p>
+          Follows, subs, gifts, bits en raids verschijnen hier.
+        </p>
+      </div>
+    ) : (
+      <div className="alerts-history-list">
+        {alertHistory.map(
+          (event) => (
+            <div
+              className={`alert-history-item ${event.platform}`}
+              key={event.id}
+            >
+              <span
+                className={`platform-badge ${event.platform}-badge`}
+              >
+                <PlatformIcon
+                  platform={
+                    event.platform as Platform
+                  }
+                />
+              </span>
+
+              <div className="alert-history-content">
+                <strong>
+                  {event.event_type}
+                </strong>
+
+                <span>
+                  {event.user?.display_name ||
+                    event.user?.username ||
+                    event.platform}
+                </span>
+              </div>
+            </div>
+          )
+        )}
+      </div>
+    )}
+  </aside>
+</div>
+
 
       {/* ===================================================
           SETTINGS
