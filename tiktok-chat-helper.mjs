@@ -55,9 +55,15 @@ connection.on(WebcastEvent.CHAT, (data) => {
 });
 
 connection.on(WebcastEvent.ROOM_USER, (data) => {
-  const viewerCount = Number(data.viewerCount);
+  const rawViewerCount = data.viewerCount;
+  const viewerCount = Number(rawViewerCount);
+
+  console.log(
+    `TIKTOK_ROOM_USER received viewerCount=${String(rawViewerCount)}`
+  );
 
   if (!Number.isFinite(viewerCount)) {
+    console.log("TIKTOK_ROOM_USER invalid viewerCount");
     return;
   }
 
@@ -65,7 +71,7 @@ connection.on(WebcastEvent.ROOM_USER, (data) => {
     JSON.stringify({
       type: "viewerCount",
       platform: "tiktok",
-      count: viewerCount,
+      count: Math.max(0, Math.trunc(viewerCount)),
     })
   );
 });

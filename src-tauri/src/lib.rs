@@ -4,7 +4,7 @@ pub mod youtube_api {
 }
 
 mod event_engine;
-
+mod diagnostics;
 mod twitch_eventsub;
 use event_engine::{EventAmount, EventType, EventUser, Platform, SdjfamEvent};
 use twitch_eventsub::{twitch_start_eventsub, twitch_stop_eventsub};
@@ -3197,8 +3197,42 @@ pub fn run() {
             tauri_plugin_updater::Builder::new()
                 .build(),
         )
+        .setup(|app| {
+            let app_version =
+                app.package_info()
+                    .version
+                    .to_string();
+
+            match diagnostics::initialize_diagnostics(
+                &app_version,
+            ) {
+                Ok(info) => {
+                    println!(
+                        "SDJFAM diagnostics actief: {}",
+                        info.log_path
+                    );
+
+                    println!(
+                        "SDJFAM diagnostics gestart: {}",
+                        info.session_started_at
+                    );
+                }
+
+                Err(error) => {
+                    eprintln!(
+                        "SDJFAM diagnostics konden niet starten: {}",
+                        error
+                    );
+                }
+            }
+
+            Ok(())
+        })
         .invoke_handler(
             tauri::generate_handler![
+                diagnostics::diagnostic_log,
+                diagnostics::diagnostic_log_path_command,
+                diagnostics::diagnostic_session_marker,
                 event_engine_test,
                 event_engine_simulate,
                 youtube_login,
