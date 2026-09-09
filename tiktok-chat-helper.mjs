@@ -58,6 +58,15 @@ connection.on(WebcastEvent.ROOM_USER, (data) => {
   const rawViewerCount = data.viewerCount;
   const viewerCount = Number(rawViewerCount);
 
+  const roomUserKeys =
+    data && typeof data === "object"
+      ? Object.keys(data).sort()
+      : [];
+
+  console.log(
+    `TIKTOK_ROOM_USER keys=${roomUserKeys.join(",")}`
+  );
+
   console.log(
     `TIKTOK_ROOM_USER received viewerCount=${String(rawViewerCount)}`
   );
@@ -66,6 +75,7 @@ connection.on(WebcastEvent.ROOM_USER, (data) => {
     console.log(
       "TIKTOK_ROOM_USER invalid viewerCount"
     );
+
     return;
   }
 

@@ -1607,6 +1607,23 @@ useEffect(() => {
 
                   break;
 
+                case "stream_ended":
+                  setYoutubeConnected(
+                    false
+                  );
+
+                  setYoutubeStatus(
+                    "YouTube livechat verbinding vernieuwen..."
+                  );
+
+                  recordConnectionState(
+                    "youtube",
+                    false,
+                    "gRPC stream ended normally"
+                  );
+
+                  break;
+
                 case "reconnecting":
                   setYoutubeConnected(
                     false

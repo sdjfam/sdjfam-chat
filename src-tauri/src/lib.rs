@@ -1410,10 +1410,10 @@ async fn run_youtube_chat_stream(
                             YouTubeChatStatusEvent {
                                 connected: false,
                                 status:
-                                    "reconnecting"
+                                    "stream_ended"
                                         .to_string(),
                                 message:
-                                    "YouTube chatstream verbroken, opnieuw verbinden..."
+                                    "YouTube chatstream afgerond, verbinding wordt vernieuwd..."
                                         .to_string(),
                             },
                         );

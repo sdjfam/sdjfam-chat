@@ -366,6 +366,20 @@ MAIN CONTENT LAYOUT
 }
 
 /* =========================
+CHAT PANEL
+========================= */
+
+.chat-panel {
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  overflow: hidden;
+}
+
+/* =========================
 ALERTS & GIFTS PANEL
 ========================= */
 
