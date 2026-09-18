@@ -3,9 +3,9 @@
   "version": "0.1.7",
   "identifier": "com.sdjde.sdjfam-chat",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run dev:tauri",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build:sidecar && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -26,7 +26,7 @@
     "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/tiktok-chat-helper"
-   ],
+    ],
     "resources": [
       "../youtube-oauth.json"
     ],

@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:sidecar": "bun build ./tiktok-chat-helper.mjs --compile --target=bun-windows-x64 --outfile ./src-tauri/binaries/tiktok-chat-helper-x86_64-pc-windows-msvc.exe",
+    "dev:tauri": "npm run build:sidecar && npm run dev",
+    "test:live-stats": "node --test tests/live-stats.test.cjs tests/tiktok-sidecar.test.mjs tests/tiktok-hook.test.cjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

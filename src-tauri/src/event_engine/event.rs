@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum Platform {
     Twitch,
+    #[serde(rename = "youtube", alias = "you_tube")]
     YouTube,
+    #[serde(rename = "tiktok", alias = "tik_tok")]
     TikTok,
     System,
 }
@@ -139,5 +141,15 @@ impl SdjfamEvent {
     ) -> Self {
         self.metadata = metadata;
         self
+    }
+}
+#[cfg(test)]
+mod platform_wire_tests {
+    use super::Platform;
+    #[test]
+    fn platform_names_match_frontend_contract() {
+        assert_eq!(serde_json::to_value(Platform::YouTube).unwrap(), "youtube");
+        assert_eq!(serde_json::to_value(Platform::TikTok).unwrap(), "tiktok");
+        assert_eq!(serde_json::to_value(Platform::Twitch).unwrap(), "twitch");
     }
 }

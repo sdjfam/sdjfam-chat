@@ -6,6 +6,7 @@ pub mod youtube_api {
 mod event_engine;
 mod diagnostics;
 mod twitch_eventsub;
+mod platforms;
 use event_engine::{EventAmount, EventType, EventUser, Platform, SdjfamEvent};
 use twitch_eventsub::{twitch_start_eventsub, twitch_stop_eventsub};
 
@@ -1389,6 +1390,9 @@ async fn run_youtube_chat_stream(
                     }
 
                     for item in response.items {
+                        if let Some(event) = platforms::youtube::events::normalize_event(&item) {
+                            let _ = app.emit("sdjfam-event", event);
+                        }
                         if let Some(chat_message) =
                             create_chat_message_event(
                                 item,

@@ -18,6 +18,7 @@
           "args": true
         }
       ]
-    }
+    },
+    "shell:allow-kill"
   ]
 }
