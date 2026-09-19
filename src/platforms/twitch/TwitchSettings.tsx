@@ -83,7 +83,7 @@ export function TwitchSettings({
 
         <strong
           className={
-            twitchAuthStatus?.connected &&
+            twitchAuthStatus?.validation_status === "validated" &&
               !twitchAuthStatus?.needs_relogin &&
               !twitchAuthStatus?.expired
               ? "status-good"
@@ -93,7 +93,9 @@ export function TwitchSettings({
           {twitchAuthStatus?.connected
             ? twitchAuthStatus.expired
               ? "Verlopen"
-              : "Gekoppeld"
+              : twitchAuthStatus.validation_status === "validated"
+                ? "Gekoppeld"
+                : "Opgeslagen / niet bevestigd"
             : "Niet gekoppeld"}
         </strong>
       </div>
@@ -130,8 +132,9 @@ export function TwitchSettings({
                 twitchEventSubStatus.status
               )
                 ? "Verbinden..."
-                : twitchEventSubStatus.status ===
-                  "reconnecting"
+                : ["reconnecting", "retry_scheduled"].includes(
+                  twitchEventSubStatus.status
+                )
                   ? "Opnieuw verbinden..."
                   : "Niet actief"}
         </strong>

@@ -6,6 +6,7 @@ pub mod youtube_api {
 mod event_engine;
 mod diagnostics;
 mod twitch_eventsub;
+mod twitch_auth;
 mod platforms;
 use event_engine::{EventAmount, EventType, EventUser, Platform, SdjfamEvent};
 use twitch_eventsub::{twitch_start_eventsub, twitch_stop_eventsub};
@@ -2197,8 +2198,7 @@ const TWITCH_TOKEN_URL: &str =
 const TWITCH_STREAMS_URL: &str =
     "https://api.twitch.tv/helix/streams";
 
-const TWITCH_PUBLIC_REFRESH_TOKEN_DAYS: i64 = 30;
-const TWITCH_RELINK_WARNING_HOURS: i64 = 24;
+
 
 // =========================================================
 // TWITCH TOKEN OPSLAG
@@ -2220,6 +2220,7 @@ struct TwitchAuthStatus {
     needs_relogin: bool,
     expired: bool,
     message: String,
+    validation_status: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -2236,12 +2237,32 @@ struct TwitchViewerResult {
     message: String,
 }
 
+#[derive(Debug, Serialize)]
+struct TwitchUserProfileResult {
+    id: String,
+    login: String,
+    display_name: String,
+    profile_image_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TwitchUsersResponse {
+    data: Vec<TwitchUserData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TwitchUserData {
+    id: String,
+    login: String,
+    display_name: String,
+    profile_image_url: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct TwitchDeviceResponse {
     device_code: String,
     expires_in: u64,
     interval: u64,
-    user_code: String,
     verification_uri: String,
 }
 
@@ -2399,6 +2420,7 @@ fn create_twitch_auth_status()
                 return Ok(
                     TwitchAuthStatus {
                         connected: false,
+                        validation_status: "not_linked".to_string(),
                         linked_at: None,
                         expected_expiry_at: None,
                         seconds_remaining: 0,
@@ -2412,62 +2434,27 @@ fn create_twitch_auth_status()
             }
         };
 
-    let expected_expiry =
-        stored_token.linked_at
-            + Duration::days(
-                TWITCH_PUBLIC_REFRESH_TOKEN_DAYS,
-            );
-
-    let remaining =
-        expected_expiry
-            .signed_duration_since(
-                Utc::now(),
-            )
-            .num_seconds();
-
-    let expired =
-        remaining <= 0;
-
-    let warning_seconds =
-        Duration::hours(
-            TWITCH_RELINK_WARNING_HOURS,
-        )
-        .num_seconds();
-
-    let needs_relogin =
-        remaining <= warning_seconds;
-
-    let message =
-        if expired {
-            "Twitch-koppeling opnieuw uitvoeren"
-                .to_string()
-        } else if needs_relogin {
-            "Twitch-koppeling verloopt binnenkort"
-                .to_string()
-        } else {
-            "Twitch API-koppeling actief"
-                .to_string()
-        };
-
-    Ok(
-        TwitchAuthStatus {
-            connected: !expired,
-            linked_at: Some(
-                stored_token
-                    .linked_at
-                    .to_rfc3339(),
-            ),
-            expected_expiry_at: Some(
-                expected_expiry
-                    .to_rfc3339(),
-            ),
-            seconds_remaining:
-                remaining.max(0),
-            needs_relogin,
-            expired,
-            message,
-        },
-    )
+    let observed = twitch_auth::observation();
+    let needs_relogin = observed.and_then(Result::err).is_some_and(|e| e.needs_relink());
+    let message = match observed {
+        Some(Ok(())) => "Twitch API laatst succesvol gecontroleerd".to_string(),
+        Some(Err(error)) => error.to_string(),
+        None => "Twitch-koppeling opgeslagen; actuele geldigheid nog niet gecontroleerd".to_string(),
+    };
+    Ok(TwitchAuthStatus {
+        connected: !needs_relogin,
+        validation_status: match observed {
+            Some(Ok(())) => "validated",
+            Some(Err(error)) => error.code(),
+            None => "unknown",
+        }.to_string(),
+        linked_at: Some(stored_token.linked_at.to_rfc3339()),
+        expected_expiry_at: None,
+        seconds_remaining: 0,
+        needs_relogin,
+        expired: false,
+        message,
+    })
 }
 
 // =========================================================
@@ -2508,11 +2495,7 @@ async fn request_twitch_device_code(
 
     if !status.is_success() {
         return Err(
-            format!(
-                "Twitch device-login fout {}: {}",
-                status,
-                body
-            ),
+            format!("Twitch device-login fout (HTTP {})", status.as_u16()),
         );
     }
 
@@ -2647,15 +2630,7 @@ async fn poll_twitch_device_token(
         }
 
         return Err(
-            format!(
-                "Twitch login mislukt {}: {}",
-                status,
-                if pending.is_empty() {
-                    body
-                } else {
-                    pending
-                }
-            ),
+            format!("Twitch login niet voltooid (HTTP {})", status.as_u16()),
         );
     }
 }
@@ -2667,76 +2642,10 @@ async fn poll_twitch_device_token(
 async fn refresh_twitch_token(
     http_client: &reqwest::Client,
     client_id: &str,
-    refresh_token: &str,
+    rejected_access_token: &str,
 ) -> Result<StoredTwitchToken, String> {
-    let response =
-        http_client
-            .post(TWITCH_TOKEN_URL)
-            .form(&[
-                (
-                    "client_id",
-                    client_id,
-                ),
-                (
-                    "grant_type",
-                    "refresh_token",
-                ),
-                (
-                    "refresh_token",
-                    refresh_token,
-                ),
-            ])
-            .send()
-            .await
-            .map_err(|e| {
-                format!(
-                    "Twitch token vernieuwen mislukt: {e}"
-                )
-            })?;
-
-    let status =
-        response.status();
-
-    let body =
-        response
-            .text()
-            .await
-            .map_err(|e| {
-                format!(
-                    "Twitch refresh-antwoord kon niet worden gelezen: {e}"
-                )
-            })?;
-
-    if !status.is_success() {
-        return Err(
-            format!(
-                "Twitch-koppeling moet opnieuw worden uitgevoerd ({}): {}",
-                status,
-                body
-            ),
-        );
-    }
-
-    let token =
-        serde_json::from_str::<TwitchTokenResponse>(
-            &body,
-        )
-        .map_err(|e| {
-            format!(
-                "Twitch refresh-JSON is ongeldig: {e}"
-            )
-        })?;
-
-    save_twitch_token(
-        &token.access_token,
-        &token.refresh_token,
-    )?;
-
-    load_stored_twitch_token()?
-        .ok_or_else(|| {
-            "Vernieuwde Twitch token kon niet worden geladen"
-                .to_string()
-        })
+    twitch_auth::refresh_after_rejection(http_client, client_id, rejected_access_token)
+        .await.map_err(String::from)
 }
 
 // =========================================================
@@ -2787,6 +2696,83 @@ async fn fetch_twitch_viewers_with_token(
             })?;
 
     Ok((status, body))
+}
+
+async fn fetch_twitch_user_profile_with_token(
+    http_client: &reqwest::Client,
+    client_id: &str,
+    user_id: &str,
+    access_token: &str,
+) -> Result<(reqwest::StatusCode, String), String> {
+    let response =
+        http_client
+            .get("https://api.twitch.tv/helix/users")
+            .query(&[
+                (
+                    "id",
+                    user_id,
+                ),
+            ])
+            .header(
+                "Client-Id",
+                client_id,
+            )
+            .bearer_auth(
+                access_token,
+            )
+            .send()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Twitch profiel-opvraag mislukt: {e}"
+                )
+            })?;
+
+    let status =
+        response.status();
+
+    let body =
+        response
+            .text()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Twitch profiel-resultaat kon niet worden gelezen: {e}"
+                )
+            })?;
+
+    Ok((status, body))
+}
+
+fn parse_twitch_user_profile_response(
+    body: &str,
+) -> Result<TwitchUserProfileResult, String> {
+    let users =
+        serde_json::from_str::<TwitchUsersResponse>(
+            body,
+        )
+        .map_err(|e| {
+            format!(
+                "Twitch profiel-JSON is ongeldig: {e}"
+            )
+        })?;
+
+    let user =
+        users
+            .data
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                "Twitch gebruiker niet gevonden"
+                    .to_string()
+            })?;
+
+    Ok(TwitchUserProfileResult {
+        id: user.id,
+        login: user.login,
+        display_name: user.display_name,
+        profile_image_url: user.profile_image_url,
+    })
 }
 
 fn parse_twitch_viewer_response(
@@ -2876,10 +2862,6 @@ async fn twitch_login(
         )
         .await?;
 
-    println!(
-        "Twitch device code: {}",
-        device.user_code
-    );
 
     app.opener()
         .open_url(
@@ -2900,10 +2882,7 @@ async fn twitch_login(
         )
         .await?;
 
-    save_twitch_token(
-        &token.access_token,
-        &token.refresh_token,
-    )?;
+    twitch_auth::save_login(&token.access_token, &token.refresh_token).await?;
 
     Ok(
         TwitchLoginResult {
@@ -2912,6 +2891,101 @@ async fn twitch_login(
                 "Twitch API succesvol gekoppeld"
                     .to_string(),
         },
+    )
+}
+
+// =========================================================
+// TAURI COMMAND: TWITCH USER PROFILE
+// =========================================================
+
+#[tauri::command]
+async fn twitch_user_profile(
+    client_id: String,
+    user_id: String,
+) -> Result<TwitchUserProfileResult, String> {
+    let client_id =
+        client_id
+            .trim()
+            .to_string();
+
+    let user_id =
+        user_id
+            .trim()
+            .to_string();
+
+    if client_id.is_empty() {
+        return Err(
+            "Twitch Client ID ontbreekt"
+                .to_string(),
+        );
+    }
+
+    if user_id.is_empty() {
+        return Err(
+            "Twitch user ID ontbreekt"
+                .to_string(),
+        );
+    }
+
+    let mut stored_token =
+        load_stored_twitch_token()?
+            .ok_or_else(|| {
+                "Twitch API is nog niet gekoppeld"
+                    .to_string()
+            })?;
+
+    let http_client =
+        create_http_client()?;
+
+    let (
+        mut status,
+        mut body,
+    ) =
+        fetch_twitch_user_profile_with_token(
+            &http_client,
+            &client_id,
+            &user_id,
+            &stored_token.access_token,
+        )
+        .await?;
+
+    if status
+        == reqwest::StatusCode::UNAUTHORIZED
+    {
+        stored_token =
+            refresh_twitch_token(
+                &http_client,
+                &client_id,
+                &stored_token.access_token,
+            )
+            .await?;
+
+        (
+            status,
+            body,
+        ) =
+            fetch_twitch_user_profile_with_token(
+                &http_client,
+                &client_id,
+                &user_id,
+                &stored_token.access_token,
+            )
+            .await?;
+    }
+
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        twitch_auth::reject_refreshed_token(&client_id, &stored_token.access_token).await;
+        return Err(twitch_auth::AuthError::RelinkRequired.into());
+    }
+
+    if !status.is_success() {
+        return Err(
+            String::from(twitch_auth::http_error(status.as_u16(), false, "")),
+        );
+    }
+
+    parse_twitch_user_profile_response(
+        &body,
     )
 }
 
@@ -2988,7 +3062,7 @@ async fn twitch_viewer_count(
             refresh_twitch_token(
                 &http_client,
                 &client_id,
-                &stored_token.refresh_token,
+                &stored_token.access_token,
             )
             .await?;
 
@@ -3005,13 +3079,14 @@ async fn twitch_viewer_count(
             .await?;
     }
 
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        twitch_auth::reject_refreshed_token(&client_id, &stored_token.access_token).await;
+        return Err(twitch_auth::AuthError::RelinkRequired.into());
+    }
+
     if !status.is_success() {
         return Err(
-            format!(
-                "Twitch Helix API fout {}: {}",
-                status,
-                body
-            ),
+            String::from(twitch_auth::http_error(status.as_u16(), false, "")),
         );
     }
 
@@ -3019,7 +3094,6 @@ async fn twitch_viewer_count(
         &body,
     )
 }
-
 
 
 // =========================================================
@@ -3249,6 +3323,7 @@ pub fn run() {
                 twitch_stop_eventsub,
                 twitch_auth_status,
                 twitch_login,
+                twitch_user_profile,
                 twitch_viewer_count
             ],
         )

@@ -1,7 +1,13 @@
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use oauth2::reqwest;
+use crate::twitch_auth::{self, AuthError};
+use std::collections::{HashSet, VecDeque};
+use std::future::Future;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tokio::time::{timeout, Instant};
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter};
 use tokio::time::{interval, sleep, Duration};
 use tokio_tungstenite::{
@@ -17,7 +23,6 @@ use crate::event_engine::{
     SdjfamEvent,
 };
 
-use crate::load_stored_twitch_token;
 
 const TWITCH_EVENTSUB_WEBSOCKET_URL: &str =
     "wss://eventsub.wss.twitch.tv/ws";
@@ -25,8 +30,6 @@ const TWITCH_EVENTSUB_WEBSOCKET_URL: &str =
 const TWITCH_EVENTSUB_SUBSCRIPTIONS_URL: &str =
     "https://api.twitch.tv/helix/eventsub/subscriptions";
 
-const TWITCH_VALIDATE_URL: &str =
-    "https://id.twitch.tv/oauth2/validate";
 
 const REQUIRED_SCOPES: [&str; 3] = [
     "moderator:read:followers",
@@ -34,21 +37,11 @@ const REQUIRED_SCOPES: [&str; 3] = [
     "bits:read",
 ];
 
-static EVENTSUB_RUN_ID: AtomicU64 =
-    AtomicU64::new(0);
-
-fn create_eventsub_http_client()
--> Result<reqwest::Client, String> {
+fn create_eventsub_http_client() -> Result<reqwest::Client, AuthError> {
     reqwest::Client::builder()
-        .user_agent(
-            "SDJFAM-Chat/0.1.2",
-        )
-        .build()
-        .map_err(|e| {
-            format!(
-                "EventSub HTTP-client kon niet worden gemaakt: {e}"
-            )
-        })
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(15))
+        .build().map_err(|_| AuthError::Configuration)
 }
 
 // =========================================================
@@ -66,115 +59,9 @@ pub struct TwitchEventSubStartResult {
 // TWITCH TOKEN VALIDATION
 // =========================================================
 
-#[derive(Debug, Deserialize)]
-struct TwitchValidateResponse {
-    client_id: String,
-
-    #[serde(default)]
-    login: Option<String>,
-
-    #[serde(default)]
-    user_id: Option<String>,
-
-    #[serde(default)]
-    scopes: Option<Vec<String>>,
-}
-
-async fn validate_twitch_token(
-    http_client: &reqwest::Client,
-    client_id: &str,
-    access_token: &str,
-) -> Result<TwitchValidateResponse, String> {
-    let response =
-        http_client
-            .get(TWITCH_VALIDATE_URL)
-            .header(
-                "Authorization",
-                format!("OAuth {access_token}"),
-            )
-            .send()
-            .await
-            .map_err(|e| {
-                format!(
-                    "Twitch tokenvalidatie kon niet worden uitgevoerd: {e}"
-                )
-            })?;
-
-    let status =
-        response.status();
-
-    let body =
-        response
-            .text()
-            .await
-            .map_err(|e| {
-                format!(
-                    "Twitch tokenvalidatie kon niet worden gelezen: {e}"
-                )
-            })?;
-
-    if !status.is_success() {
-        return Err(
-            "Twitch login is niet meer geldig. Koppel Twitch opnieuw."
-                .to_string(),
-        );
-    }
-
-    let validation =
-        serde_json::from_str::<TwitchValidateResponse>(
-            &body,
-        )
-        .map_err(|e| {
-            format!(
-                "Twitch tokenvalidatie bevat ongeldige JSON: {e}"
-            )
-        })?;
-
-    if validation.client_id != client_id {
-        return Err(
-            "De opgeslagen Twitch-login hoort bij een andere Client ID. Koppel Twitch opnieuw."
-                .to_string(),
-        );
-    }
-
-    let missing_scopes =
-        REQUIRED_SCOPES
-            .iter()
-            .filter(|required| {
-                !validation
-                    .scopes
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                    .any(|scope| {
-                        scope == **required
-                    })
-            })
-            .copied()
-            .collect::<Vec<_>>();
-
-    if !missing_scopes.is_empty() {
-        return Err(
-            format!(
-                "Twitch moet opnieuw gekoppeld worden voor EventSub. Ontbrekende rechten: {}",
-                missing_scopes.join(", ")
-            ),
-        );
-    }
-
-    if validation
-        .user_id
-        .as_deref()
-        .unwrap_or("")
-        .is_empty()
-    {
-        return Err(
-            "Twitch token bevat geen gebruikers-ID."
-                .to_string(),
-        );
-    }
-
-    Ok(validation)
+async fn validate_twitch_token(http: &reqwest::Client, client_id: &str)
+    -> Result<(crate::StoredTwitchToken, twitch_auth::Validation), AuthError> {
+    twitch_auth::validated_token(http, client_id, &REQUIRED_SCOPES).await
 }
 
 // =========================================================
@@ -208,67 +95,29 @@ async fn create_subscription(
     subscription_type: &str,
     version: &str,
     condition: Value,
-) -> Result<(), String> {
-    let request_body =
-        json!({
-            "type": subscription_type,
-            "version": version,
-            "condition": condition,
-            "transport": {
-                "method": "websocket",
-                "session_id": session_id,
-            }
-        });
-
-    let response =
-        http_client
-            .post(
-                TWITCH_EVENTSUB_SUBSCRIPTIONS_URL,
-            )
-            .header(
-                "Client-Id",
-                client_id,
-            )
-            .bearer_auth(
-                access_token,
-            )
-            .json(
-                &request_body,
-            )
-            .send()
-            .await
-            .map_err(|e| {
-                format!(
-                    "EventSub subscription {subscription_type} kon niet worden aangemaakt: {e}"
-                )
-            })?;
-
-    let status =
-        response.status();
-
-    let body =
-        response
-            .text()
-            .await
-            .unwrap_or_default();
-
-    if !status.is_success() {
-        return Err(
-            format!(
-                "Twitch EventSub {} fout {}: {}",
-                subscription_type,
-                status,
-                body,
-            ),
-        );
+) -> Result<(), AuthError> {
+    let request_body = json!({
+        "type": subscription_type, "version": version, "condition": condition,
+        "transport": { "method": "websocket", "session_id": session_id }
+    });
+    let send = |token: String| {
+        http_client.post(TWITCH_EVENTSUB_SUBSCRIPTIONS_URL)
+            .header("Client-Id", client_id).bearer_auth(token).header("Content-Type", "application/json").body(request_body.to_string()).send()
+    };
+    // Only retry the rejected subscription, never the whole partial batch on this socket.
+    let mut response = send(access_token.to_string()).await.map_err(|_| AuthError::Network)?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let token = twitch_auth::refresh_after_rejection(http_client, client_id, access_token).await?;
+        response = send(token.access_token.clone()).await.map_err(|_| AuthError::Network)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            twitch_auth::reject_refreshed_token(client_id, &token.access_token).await;
+            return Err(AuthError::RelinkRequired);
+        }
     }
-
-    println!(
-        "SDJFAM EventSub actief: {} v{}",
-        subscription_type,
-        version,
-    );
-
+    if !response.status().is_success() {
+        let error = twitch_auth::http_error(response.status().as_u16(), false, "");
+        return Err(if error == AuthError::AccessInvalid { AuthError::RelinkRequired } else { error });
+    }
     Ok(())
 }
 
@@ -282,7 +131,7 @@ async fn register_subscriptions(
     access_token: &str,
     broadcaster_user_id: &str,
     session_id: &str,
-) -> Result<(), String> {
+) -> Result<(), AuthError> {
     create_subscription(
         http_client,
         client_id,
@@ -682,501 +531,378 @@ fn normalize_notification(
     }
 }
 
-// =========================================================
-// EVENTSUB WEBSOCKET LOOP
-// =========================================================
-
-async fn run_eventsub(
-    app: AppHandle,
-    client_id: String,
-    access_token: String,
-    broadcaster_user_id: String,
-    run_id: u64,
-) -> Result<(), String> {
-    let http_client =
-        create_eventsub_http_client()?;
-
-    let mut websocket_url =
-        TWITCH_EVENTSUB_WEBSOCKET_URL
-            .to_string();
-
-    let mut create_subscriptions_on_welcome =
-        true;
-
-    loop {
-        if EVENTSUB_RUN_ID.load(
-            Ordering::SeqCst,
-        ) != run_id
-        {
-            return Ok(());
+// One owner controls start, cancellation and retries. Stop waits for the old task
+// to drop its socket before another start can acquire the slot.
+struct TaskSlot { task: Mutex<Option<JoinHandle<()>>> }
+impl TaskSlot {
+    const fn new() -> Self { Self { task: Mutex::const_new(None) } }
+    async fn start(&self, task: impl Future<Output = ()> + Send + 'static) -> bool {
+        let mut slot = self.task.lock().await;
+        if slot.as_ref().is_some_and(|task| !task.is_finished()) { return false; }
+        *slot = Some(tokio::spawn(task));
+        true
+    }
+    async fn stop(&self) {
+        let mut slot = self.task.lock().await;
+        if let Some(task) = slot.take() {
+            task.abort();
+            let _ = task.await;
         }
+    }
+}
+static EVENTSUB_TASK: TaskSlot = TaskSlot::new();
 
-        emit_status(
-            &app,
-            "connecting",
-            "Verbinden met Twitch EventSub...",
-        );
+#[derive(Default)]
+struct RetryBudget { failures: usize }
+impl RetryBudget {
+    fn next(&mut self, error: AuthError) -> Option<Duration> {
+        const DELAYS: [u64; 6] = [5, 10, 20, 40, 80, 120];
+        if !error.retryable() { return None; }
+        let seconds = *DELAYS.get(self.failures)?;
+        self.failures += 1;
+        Some(Duration::from_secs(seconds))
+    }
+    fn healthy(&mut self, since: Instant) {
+        // A welcome alone does not replenish the retry budget of a flapping socket.
+        if since.elapsed() >= Duration::from_secs(300) { self.failures = 0; }
+    }
+}
 
-        let connection =
-            connect_async(
-                websocket_url.as_str(),
-            )
-            .await;
+#[derive(Default)]
+struct MessageIds { ids: HashSet<String>, order: VecDeque<String> }
+impl MessageIds {
+    fn first(&mut self, id: &str) -> bool {
+        if id.is_empty() || !self.ids.insert(id.to_string()) { return false; }
+        self.order.push_back(id.to_string());
+        if self.order.len() > 4096 {
+            if let Some(old) = self.order.pop_front() { self.ids.remove(&old); }
+        }
+        true
+    }
+}
 
-        let (mut socket, _) =
-            match connection {
-                Ok(value) => value,
+// Survives task replacement; Twitch redelivery must not emit a second alert.
+static MESSAGE_IDS: std::sync::LazyLock<std::sync::Mutex<MessageIds>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(MessageIds::default()));
 
-                Err(error) => {
-                    emit_status(
-                        &app,
-                        "reconnecting",
-                        format!(
-                            "EventSub verbinding mislukt: {error}"
-                        ),
-                    );
+type EventSocket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-                    sleep(
-                        Duration::from_secs(3),
-                    )
-                    .await;
+fn emit_notification(app: &AppHandle, value: &Value) {
+    let id = value.pointer("/metadata/message_id").and_then(Value::as_str).unwrap_or("");
+    if MESSAGE_IDS.lock().unwrap_or_else(|e| e.into_inner()).first(id) {
+        if let Some(event) = normalize_notification(value) { let _ = app.emit("sdjfam-event", &event); }
+    }
+}
 
-                    websocket_url =
-                        TWITCH_EVENTSUB_WEBSOCKET_URL
-                            .to_string();
-
-                    create_subscriptions_on_welcome =
-                        true;
-
-                    continue;
-                }
-            };
-
-        emit_status(
-            &app,
-            "socket_connected",
-            "Twitch EventSub WebSocket verbonden",
-        );
-
-        let mut reconnect_url:
-            Option<String> = None;
-
-        let mut validation_interval =
-            interval(
-                Duration::from_secs(3600),
-            );
-
-        // interval() tikt direct bij de eerste tick.
-        validation_interval.tick().await;
-
-        loop {
-            if EVENTSUB_RUN_ID.load(
-                Ordering::SeqCst,
-            ) != run_id
-            {
-                let _ =
-                    socket.close(None).await;
-
-                emit_status(
-                    &app,
-                    "stopped",
-                    "Twitch EventSub gestopt",
-                );
-
-                return Ok(());
-            }
-
+// Twitch requires overlap during server-requested handover. Both sockets belong
+// to this one task; the replacement inherits subscriptions and never registers again.
+async fn handover(old: &mut EventSocket, url: &str, mut deliver: impl FnMut(&Value))
+    -> Result<(EventSocket, Value), AuthError> {
+    timeout(Duration::from_secs(25), async {
+        let connecting = connect_async(url);
+        tokio::pin!(connecting);
+        let mut old_open = true;
+        let mut replacement = loop {
             tokio::select! {
-                _ = validation_interval.tick() => {
-                    if let Err(error) =
-                        validate_twitch_token(
-                            &http_client,
-                            &client_id,
-                            &access_token,
-                        )
-                        .await
-                    {
-                        emit_status(
-                            &app,
-                            "auth_error",
-                            error.clone(),
-                        );
-
-                        return Err(error);
+                result = &mut connecting => break result.map_err(|_| AuthError::Network)?.0,
+                message = old.next(), if old_open => {
+                    match message {
+                        Some(Ok(Message::Text(text))) => {
+                            let value: Value = serde_json::from_str(&text).map_err(|_| AuthError::Protocol)?;
+                            if value.pointer("/metadata/message_type").and_then(Value::as_str) == Some("notification") { deliver(&value); }
+                        }
+                        Some(Ok(Message::Ping(data))) => { old.send(Message::Pong(data)).await.map_err(|_| AuthError::Network)?; }
+                        None | Some(Err(_)) | Some(Ok(Message::Close(_))) => old_open = false,
+                        _ => {}
                     }
                 }
-
-                message = socket.next() => {
-                    let Some(message) = message else {
-                        break;
-                    };
-
-                    let message =
-                        match message {
-                            Ok(value) => value,
-
-                            Err(error) => {
-                                println!(
-                                    "Twitch EventSub WebSocket fout: {}",
-                                    error,
-                                );
-
-                                break;
-                            }
-                        };
-
+            }
+        };
+        loop {
+            tokio::select! {
+                message = replacement.next() => {
                     match message {
-                        Message::Text(text) => {
-                            let text =
-                                text.to_string();
-
-                            let json_message =
-                                match serde_json::from_str::<Value>(
-                                    &text,
-                                ) {
-                                    Ok(value) => value,
-
-                                    Err(error) => {
-                                        println!(
-                                            "Ongeldige Twitch EventSub JSON: {}",
-                                            error,
-                                        );
-
-                                        continue;
-                                    }
-                                };
-
-                            let message_type =
-                                json_message
-                                    .get("metadata")
-                                    .and_then(|metadata| {
-                                        metadata.get(
-                                            "message_type"
-                                        )
-                                    })
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("");
-
-                            match message_type {
-                                "session_welcome" => {
-                                    let session_id =
-                                        json_message
-                                            .pointer(
-                                                "/payload/session/id"
-                                            )
-                                            .and_then(
-                                                Value::as_str
-                                            )
-                                            .ok_or_else(|| {
-                                                "Twitch EventSub welcome bevat geen session ID"
-                                                    .to_string()
-                                            })?;
-
-                                    if create_subscriptions_on_welcome {
-                                        register_subscriptions(
-                                            &http_client,
-                                            &client_id,
-                                            &access_token,
-                                            &broadcaster_user_id,
-                                            session_id,
-                                        )
-                                        .await?;
-
-                                        emit_status(
-                                            &app,
-                                            "connected",
-                                            "Twitch EventSub actief",
-                                        );
-                                    }
-                                    else {
-                                        emit_status(
-                                            &app,
-                                            "connected",
-                                            "Twitch EventSub opnieuw verbonden",
-                                        );
-                                    }
-                                }
-
-                                "notification" => {
-                                    if let Some(event) =
-                                        normalize_notification(
-                                            &json_message,
-                                        )
-                                    {
-                                        println!(
-                                            "SDJFAM EVENT: {:?} / {:?}",
-                                            event.platform,
-                                            event.event_type,
-                                        );
-
-                                        if let Err(error) =
-                                            app.emit(
-                                                "sdjfam-event",
-                                                &event,
-                                            )
-                                        {
-                                            println!(
-                                                "SDJFAM event kon niet naar frontend: {}",
-                                                error,
-                                            );
-                                        }
-                                    }
-                                }
-
-                                "session_keepalive" => {
-                                    // Verbinding is gezond.
-                                }
-
-                                "session_reconnect" => {
-                                    reconnect_url =
-                                        json_message
-                                            .pointer(
-                                                "/payload/session/reconnect_url"
-                                            )
-                                            .and_then(
-                                                Value::as_str
-                                            )
-                                            .map(
-                                                str::to_string
-                                            );
-
-                                    if reconnect_url.is_some() {
-                                        emit_status(
-                                            &app,
-                                            "reconnecting",
-                                            "Twitch vraagt EventSub reconnect",
-                                        );
-
-                                        break;
-                                    }
-                                }
-
-                                "revocation" => {
-                                    let subscription_type =
-                                        json_message
-                                            .pointer(
-                                                "/payload/subscription/type"
-                                            )
-                                            .and_then(
-                                                Value::as_str
-                                            )
-                                            .unwrap_or(
-                                                "onbekend"
-                                            );
-
-                                    let status =
-                                        json_message
-                                            .pointer(
-                                                "/payload/subscription/status"
-                                            )
-                                            .and_then(
-                                                Value::as_str
-                                            )
-                                            .unwrap_or(
-                                                "onbekend"
-                                            );
-
-                                    emit_status(
-                                        &app,
-                                        "revoked",
-                                        format!(
-                                            "EventSub {} ingetrokken: {}",
-                                            subscription_type,
-                                            status,
-                                        ),
-                                    );
-                                }
-
-                                _ => {}
-                            }
+                        Some(Ok(Message::Text(text))) => {
+                            let welcome: Value = serde_json::from_str(&text).map_err(|_| AuthError::Protocol)?;
+                            if welcome.pointer("/metadata/message_type").and_then(Value::as_str) != Some("session_welcome") ||
+                                welcome.pointer("/payload/session/id").and_then(Value::as_str).is_none() { return Err(AuthError::Protocol); }
+                            let _ = timeout(Duration::from_secs(1), old.close(None)).await;
+                            return Ok((replacement, welcome));
                         }
-
-                        Message::Ping(payload) => {
-                            if let Err(error) =
-                                socket
-                                    .send(
-                                        Message::Pong(
-                                            payload,
-                                        ),
-                                    )
-                                    .await
-                            {
-                                println!(
-                                    "EventSub pong mislukt: {}",
-                                    error,
-                                );
-
-                                break;
-                            }
+                        Some(Ok(Message::Ping(data))) => { replacement.send(Message::Pong(data)).await.map_err(|_| AuthError::Network)?; }
+                        _ => return Err(AuthError::Network),
+                    }
+                }
+                message = old.next(), if old_open => {
+                    match message {
+                        Some(Ok(Message::Text(text))) => {
+                            let value: Value = serde_json::from_str(&text).map_err(|_| AuthError::Protocol)?;
+                            if value.pointer("/metadata/message_type").and_then(Value::as_str) == Some("notification") { deliver(&value); }
                         }
-
-                        Message::Close(_) => {
-                            break;
-                        }
-
+                        Some(Ok(Message::Ping(data))) => { old.send(Message::Pong(data)).await.map_err(|_| AuthError::Network)?; }
+                        None | Some(Err(_)) | Some(Ok(Message::Close(_))) => old_open = false,
                         _ => {}
                     }
                 }
             }
         }
-
-        if let Some(url) =
-            reconnect_url
-        {
-            websocket_url =
-                url;
-
-            create_subscriptions_on_welcome =
-                false;
-        }
-        else {
-            emit_status(
-                &app,
-                "reconnecting",
-                "Twitch EventSub verbinding verbroken; opnieuw verbinden...",
-            );
-
-            websocket_url =
-                TWITCH_EVENTSUB_WEBSOCKET_URL
-                    .to_string();
-
-            create_subscriptions_on_welcome =
-                true;
-
-            sleep(
-                Duration::from_secs(3),
-            )
-            .await;
-        }
-    }
+    }).await.map_err(|_| AuthError::Network)?
 }
 
-// =========================================================
-// TAURI COMMAND: START EVENTSUB
-// =========================================================
-
-#[tauri::command]
-pub async fn twitch_start_eventsub(
-    app: AppHandle,
-    client_id: String,
-) -> Result<TwitchEventSubStartResult, String> {
-    let client_id =
-        client_id
-            .trim()
-            .to_string();
-
-    if client_id.is_empty() {
-        return Err(
-            "Twitch Client ID ontbreekt"
-                .to_string(),
-        );
-    }
-
-    let stored_token =
-        load_stored_twitch_token()?
-            .ok_or_else(|| {
-                "Twitch API is nog niet gekoppeld"
-                    .to_string()
-            })?;
-
-    let http_client =
-        create_eventsub_http_client()?;
-
-    let validation =
-        validate_twitch_token(
-            &http_client,
-            &client_id,
-            &stored_token.access_token,
-        )
-        .await?;
-
-    let broadcaster_user_id =
-        validation
-            .user_id
-            .clone()
-            .ok_or_else(|| {
-                "Twitch gebruikers-ID ontbreekt"
-                    .to_string()
-            })?;
-
-    let broadcaster_login =
-        validation
-            .login
-            .clone()
-            .unwrap_or_else(|| {
-                "Twitch".to_string()
-            });
-
-    let run_id =
-        EVENTSUB_RUN_ID
-            .fetch_add(
-                1,
-                Ordering::SeqCst,
-            )
-            + 1;
-
-    let task_app =
-        app.clone();
-
-    let task_client_id =
-        client_id.clone();
-
-    let task_access_token =
-        stored_token
-            .access_token
-            .clone();
-
-    tauri::async_runtime::spawn(
-        async move {
-            if let Err(error) =
-                run_eventsub(
-                    task_app.clone(),
-                    task_client_id,
-                    task_access_token,
-                    broadcaster_user_id,
-                    run_id,
-                )
-                .await
-            {
-                println!(
-                    "Twitch EventSub gestopt met fout: {}",
-                    error,
-                );
-
-                emit_status(
-                    &task_app,
-                    "error",
-                    error,
-                );
+async fn run_eventsub(app: &AppHandle, http: &reqwest::Client, client_id: &str,
+    budget: &mut RetryBudget, recovered: bool) -> Result<(), AuthError> {
+    let (mut token, validation) = validate_twitch_token(http, client_id).await?;
+    let user_id = validation.user_id.ok_or(AuthError::Protocol)?;
+    let mut replacement: Option<(EventSocket, Value)> = None;
+    let mut transferred = false;
+    let mut validation_interval = interval(Duration::from_secs(3600));
+    validation_interval.tick().await;
+    loop {
+        emit_status(app, "connecting", "Verbinden met Twitch EventSub...");
+        let (mut socket, mut pending_welcome) = if let Some((socket, welcome)) = replacement.take() {
+            (socket, Some(welcome))
+        } else {
+            let (socket, _) = timeout(Duration::from_secs(20), connect_async(TWITCH_EVENTSUB_WEBSOCKET_URL))
+                .await.map_err(|_| AuthError::Network)?.map_err(|_| AuthError::Network)?;
+            (socket, None)
+        };
+        emit_status(app, "socket_connected", "Twitch EventSub WebSocket verbonden");
+        let mut welcomed = false;
+        let mut healthy_since = None;
+        let mut keepalive = Duration::from_secs(30);
+        let mut deadline = Instant::now() + Duration::from_secs(15);
+        let mut reconnect_url = None;
+        let result = async {
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(deadline) => return Err(AuthError::Network),
+                    _ = validation_interval.tick() => {
+                        let (current, validation) = validate_twitch_token(http, client_id).await?;
+                        if validation.user_id.as_deref() != Some(user_id.as_str()) {
+                            return Err(AuthError::Configuration);
+                        }
+                        token = current;
+                    }
+                    message = async {
+                        if let Some(welcome) = pending_welcome.take() { Some(Ok(Message::Text(welcome.to_string().into()))) }
+                        else { socket.next().await }
+                    } => {
+                        let message = message.ok_or(AuthError::Network)?.map_err(|_| AuthError::Network)?;
+                        match message {
+                            Message::Text(text) => {
+                                let value: Value = serde_json::from_str(&text).map_err(|_| AuthError::Protocol)?;
+                                let kind = value.pointer("/metadata/message_type").and_then(Value::as_str).unwrap_or("");
+                                deadline = Instant::now() + keepalive;
+                                match kind {
+                                    "session_welcome" if !welcomed => {
+                                        welcomed = true;
+                                        let session_id = value.pointer("/payload/session/id").and_then(Value::as_str).ok_or(AuthError::Protocol)?;
+                                        keepalive = Duration::from_secs(value.pointer("/payload/session/keepalive_timeout_seconds")
+                                            .and_then(Value::as_u64).unwrap_or(30).clamp(10, 600) + 5);
+                                        if !transferred {
+                                            register_subscriptions(http, client_id, &token.access_token, &user_id, session_id).await?;
+                                        }
+                                        deadline = Instant::now() + keepalive;
+                                        healthy_since = Some(Instant::now());
+                                        if recovered { twitch_auth::log("EventSub recovered"); }
+                                        emit_status(app, "connected", "Twitch EventSub actief");
+                                    }
+                                    "notification" if welcomed => emit_notification(app, &value),
+                                    "session_reconnect" if welcomed => {
+                                        let next = value.pointer("/payload/session/reconnect_url").and_then(Value::as_str).ok_or(AuthError::Protocol)?;
+                                        let parsed = url::Url::parse(next).map_err(|_| AuthError::Protocol)?;
+                                        if parsed.scheme() != "wss" || parsed.host_str() != Some("eventsub.wss.twitch.tv") {
+                                            return Err(AuthError::Protocol);
+                                        }
+                                        reconnect_url = Some(next.to_string());
+                                        return Ok(());
+                                    }
+                                    "revocation" => {
+                                        let reason = value.pointer("/payload/subscription/status").and_then(Value::as_str).unwrap_or("");
+                                        return Err(match reason {
+                                            "authorization_revoked" | "user_removed" => AuthError::RelinkRequired,
+                                            _ => AuthError::Configuration,
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Message::Ping(payload) => { socket.send(Message::Pong(payload)).await.map_err(|_| AuthError::Network)?; }
+                            Message::Close(_) => return Err(AuthError::Network),
+                            _ => {}
+                        }
+                    }
+                }
             }
-        },
-    );
-
-    Ok(
-        TwitchEventSubStartResult {
-            connected: true,
-            broadcaster_login:
-                broadcaster_login.clone(),
-            message:
-                format!(
-                    "Twitch EventSub wordt gestart voor {}",
-                    broadcaster_login,
-                ),
-        },
-    )
+        }.await;
+        if let Some(since) = healthy_since { budget.healthy(since); }
+        if let Err(error) = result {
+            let _ = timeout(Duration::from_secs(2), socket.close(None)).await;
+            return Err(error);
+        }
+        let url = reconnect_url.ok_or(AuthError::Protocol)?;
+        emit_status(app, "reconnecting", "Twitch vraagt EventSub reconnect");
+        replacement = Some(handover(&mut socket, &url, |value| emit_notification(app, value)).await?);
+        drop(socket);
+        transferred = true;
+    }
 }
 
-// =========================================================
-// TAURI COMMAND: STOP EVENTSUB
-// =========================================================
+async fn wait_for_retry(delay: Option<Duration>, tokens: &mut tokio::sync::watch::Receiver<u64>) -> bool {
+    match delay {
+        Some(delay) => tokio::select! {
+            _ = sleep(delay) => true,
+            changed = tokens.changed() => changed.is_ok(),
+        },
+        None => tokens.changed().await.is_ok(),
+    }
+}
+
+async fn supervise_eventsub(app: AppHandle, client_id: String) {
+    let http = match create_eventsub_http_client() {
+        Ok(http) => http,
+        Err(error) => { emit_status(&app, error.code(), error.to_string()); return; }
+    };
+    let mut budget = RetryBudget::default();
+    let mut tokens = twitch_auth::token_changes();
+    let mut recovered = false;
+    loop {
+        let error = match run_eventsub(&app, &http, &client_id, &mut budget, recovered).await {
+            Ok(()) => return,
+            Err(error) => error,
+        };
+        // Consume changes made during this attempt, including our own refresh.
+        // Only a later successful token replacement wakes a paused supervisor.
+        tokens.borrow_and_update();
+        twitch_auth::log(&format!("EventSub stopped | category={}", error.code()));
+        emit_status(&app, error.code(), error.to_string());
+        match budget.next(error) {
+            Some(delay) => {
+                twitch_auth::log(&format!("EventSub retry scheduled | category={} | delay_seconds={}", error.code(), delay.as_secs()));
+                emit_status(&app, "retry_scheduled", format!("{} Nieuwe poging over {} seconden.", error, delay.as_secs()));
+                if !wait_for_retry(Some(delay), &mut tokens).await { return; }
+                recovered = true;
+            }
+            None => {
+                if error.retryable() {
+                    emit_status(&app, "retry_exhausted", "EventSub herstel gepauzeerd na zes pogingen. Controleer de verbinding. Een vernieuwde Twitch-koppeling of herstart hervat herstel.");
+                    if wait_for_retry(None, &mut tokens).await {
+                        budget = RetryBudget::default();
+                        recovered = true;
+                        continue;
+                    }
+                }
+                return;
+            }
+        }
+    }
+}
 
 #[tauri::command]
-pub fn twitch_stop_eventsub()
--> Result<(), String> {
-    EVENTSUB_RUN_ID.fetch_add(
-        1,
-        Ordering::SeqCst,
-    );
+pub async fn twitch_start_eventsub(app: AppHandle, client_id: String) -> Result<TwitchEventSubStartResult, String> {
+    let client_id = client_id.trim().to_string();
+    if client_id.is_empty() { return Err(AuthError::Configuration.into()); }
+    EVENTSUB_TASK.start(supervise_eventsub(app, client_id)).await;
+    // Accepted is not connected; the status event is authoritative.
+    Ok(TwitchEventSubStartResult { connected: false, broadcaster_login: String::new(), message: "Twitch EventSub start aangevraagd".to_string() })
+}
 
+#[tauri::command]
+pub async fn twitch_stop_eventsub() -> Result<(), String> {
+    EVENTSUB_TASK.stop().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    #[tokio::test]
+    async fn concurrent_starts_only_run_one_worker_and_stop_waits() {
+        struct Guard(Arc<AtomicUsize>);
+        impl Drop for Guard { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); } }
+        let slot = TaskSlot::new();
+        let active = Arc::new(AtomicUsize::new(0));
+        let ready = Arc::new(tokio::sync::Notify::new());
+        let worker = || { let active=active.clone(); let ready=ready.clone(); async move {
+            active.fetch_add(1,Ordering::SeqCst); let _guard=Guard(active);
+            ready.notify_one(); std::future::pending::<()>().await;
+        }};
+        let (a,b)=tokio::join!(slot.start(worker()),slot.start(worker()));
+        assert_ne!(a,b); ready.notified().await; assert_eq!(active.load(Ordering::SeqCst),1);
+        slot.stop().await; assert_eq!(active.load(Ordering::SeqCst),0);
+        assert!(slot.start(worker()).await); ready.notified().await;
+        slot.stop().await; assert_eq!(active.load(Ordering::SeqCst),0);
+    }
+    #[tokio::test]
+    async fn stop_cancels_pending_retry() {
+        let slot=TaskSlot::new(); let started=Arc::new(AtomicUsize::new(0)); let count=started.clone();
+        slot.start(async move { sleep(Duration::from_secs(60)).await; count.fetch_add(1,Ordering::SeqCst); }).await;
+        slot.stop().await; assert_eq!(started.load(Ordering::SeqCst),0);
+    }
+    #[test]
+    fn retry_budget_is_bounded_and_terminal_errors_stop_immediately() {
+        let mut budget=RetryBudget::default();
+        let delays:Vec<_>=(0..7).map(|_|budget.next(AuthError::Network).map(|d|d.as_secs())).collect();
+        assert_eq!(delays,vec![Some(5),Some(10),Some(20),Some(40),Some(80),Some(120),None]);
+        for error in [AuthError::RelinkRequired,AuthError::MissingScopes,AuthError::Configuration,AuthError::Storage] {
+            assert!(RetryBudget::default().next(error).is_none());
+        }
+    }
+    #[test]
+    fn quick_welcome_does_not_reset_budget_but_stable_connection_does() {
+        let mut budget=RetryBudget::default(); budget.next(AuthError::Network);
+        budget.healthy(Instant::now()); assert_eq!(budget.failures,1);
+        budget.healthy(Instant::now()-Duration::from_secs(301)); assert_eq!(budget.failures,0);
+    }
+    #[test]
+    fn notification_redelivery_is_deduplicated() {
+        let mut ids=MessageIds::default(); assert!(ids.first("event-1")); assert!(!ids.first("event-1"));
+        assert!(!ids.first("")); assert!(ids.first("event-2"));
+    }
+    #[tokio::test]
+    async fn external_token_refresh_wakes_paused_recovery_without_polling() {
+        let (sender,mut receiver)=tokio::sync::watch::channel(0);
+        let wait=tokio::spawn(async move { wait_for_retry(None,&mut receiver).await });
+        tokio::task::yield_now().await; assert!(!wait.is_finished());
+        sender.send_replace(1);
+        assert!(timeout(Duration::from_secs(1),wait).await.unwrap().unwrap());
+    }
+
+    #[tokio::test]
+    async fn server_handover_delivers_old_events_until_new_welcome_and_then_closes_old() {
+        let old_listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let new_listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let old_url=format!("ws://{}",old_listener.local_addr().unwrap());
+        let new_url=format!("ws://{}",new_listener.local_addr().unwrap());
+        let (send_welcome, allow_welcome)=tokio::sync::oneshot::channel();
+        let (send_event, allow_event)=tokio::sync::oneshot::channel();
+        let old_server=tokio::spawn(async move {
+            let (tcp,_)=old_listener.accept().await.unwrap();
+            let mut ws=tokio_tungstenite::accept_async(tcp).await.unwrap();
+            allow_event.await.unwrap();
+            ws.send(Message::Text(json!({"metadata":{"message_type":"notification","message_id":"during-handover"}}).to_string().into())).await.unwrap();
+            // The client must deliver this event before the new welcome is allowed.
+            let message=timeout(Duration::from_secs(3),ws.next()).await.unwrap().unwrap().unwrap();
+            assert!(matches!(message,Message::Close(_)));
+        });
+        let new_server=tokio::spawn(async move {
+            let (tcp,_)=new_listener.accept().await.unwrap();
+            let mut ws=tokio_tungstenite::accept_async(tcp).await.unwrap();
+            send_event.send(()).unwrap();
+            allow_welcome.await.unwrap();
+            ws.send(Message::Text(json!({"metadata":{"message_type":"session_welcome"},"payload":{"session":{"id":"replacement"}}}).to_string().into())).await.unwrap();
+            // The handover must not send subscription commands over this socket.
+            let _=ws.next().await;
+        });
+        let (mut old,_)=connect_async(old_url).await.unwrap();
+        let mut delivered=0;let mut signal=Some(send_welcome);
+        let (mut new,welcome)=timeout(Duration::from_secs(5),handover(&mut old,&new_url,|value| {
+            assert_eq!(value.pointer("/metadata/message_id").and_then(Value::as_str),Some("during-handover"));
+            delivered+=1;signal.take().unwrap().send(()).unwrap();
+        })).await.unwrap().unwrap();
+        assert_eq!(delivered,1);assert_eq!(welcome.pointer("/payload/session/id").and_then(Value::as_str),Some("replacement"));
+        new.close(None).await.unwrap();old_server.await.unwrap();new_server.await.unwrap();
+    }
+
 }

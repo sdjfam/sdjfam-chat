@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChatMessage } from "../types/chat";
+import type { ChatMessage, ChatUserProfile } from "../types/chat";
 
 export function useChat() {
   const [
@@ -10,6 +10,11 @@ export function useChat() {
 
   const messageListRef =
     useRef<HTMLDivElement | null>(null);
+
+  const chatUserProfilesRef =
+    useRef<Map<string, ChatUserProfile>>(
+      new Map()
+    );
 
   useEffect(() => {
     const list =
@@ -25,6 +30,7 @@ export function useChat() {
   return {
     messages,
     setMessages,
-    messageListRef
+    messageListRef,
+    chatUserProfilesRef
   };
 }

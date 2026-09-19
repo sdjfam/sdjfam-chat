@@ -87,6 +87,16 @@ export function ChatMessages({
                 />
               </span>
 
+              {chat.avatarUrl && (
+                <img
+                  className="chat-avatar"
+                  src={chat.avatarUrl}
+                  alt=""
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+
               <div className="message-content">
                 <strong>
                   {chat.username}

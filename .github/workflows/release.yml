@@ -63,13 +63,13 @@ jobs:
           tagName: v__VERSION__
           releaseName: "SDJFAM Chat v__VERSION__"
           releaseBody: |
-            Nieuw in SDJFAM Chat v0.1.5:
+            Nieuw in SDJFAM Chat v0.1.8:
 
-            - TikTok LIVE-chat toegevoegd
-            - TikTok viewer count toegevoegd
-            - Twitch, YouTube en TikTok viewer counts bovenaan de app
-            - Viewer counts uit Settings verwijderd
-            - Verbeteringen aan de TikTok-integratie
+            - Automatisch Twitch-tokenherstel en betrouwbaarder EventSub-herstel
+            - Veilige EventSub-overdracht bij Twitch-reconnects
+            - Duidelijk onderscheid tussen tijdelijke fouten en opnieuw koppelen
+            - Twitch-avatars in de chat
+            - Compacte TikTok Live Stats en uniforme live-events
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

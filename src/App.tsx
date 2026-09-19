@@ -28,6 +28,7 @@ function App() {
   const events = usePlatformEvents({ pushAlert: alerts.pushAlert, setMessages: chat.setMessages });
   const twitch = useTwitch({
     setMessages: chat.setMessages,
+    chatUserProfilesRef: chat.chatUserProfilesRef,
   });
   const youtube = useYouTube({ setMessages: chat.setMessages });
   const tiktok = useTikTok({

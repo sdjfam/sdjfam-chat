@@ -2,24 +2,31 @@ import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import type * as React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import tmi from "tmi.js";
 import { diagnosticError, diagnosticLog, incrementDiagnosticCounter, recordChatMessage, recordConnectionState, recordDiagnosticEvent, recordViewerCount, updatePlatformDiagnosticState } from "../../diagnostics";
-import type { ChatMessage } from "../../types/chat";
+import type { ChatMessage, ChatUserProfile } from "../../types/chat";
 import { normalizeViewerCount } from "../../utils/normalizeViewerCount";
 import { TWITCH_CHANNEL, TWITCH_CLIENT_ID } from "./config";
-import type { TwitchAuthStatus, TwitchEventSubStatus, TwitchLoginResult, TwitchViewerResult } from "./types";
+import type { TwitchAuthStatus, TwitchEventSubStatus, TwitchLoginResult, TwitchUserProfileResult, TwitchViewerResult } from "./types";
 
 let twitchEventSubLifecycle: Promise<void> =
   Promise.resolve();
 
 type TwitchOptions = {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  chatUserProfilesRef: React.RefObject<Map<string, ChatUserProfile>>;
 };
 
 export function useTwitch({
-  setMessages
+  setMessages,
+  chatUserProfilesRef
 }: TwitchOptions) {
+  const twitchProfileRequestsRef =
+    useRef<Set<string>>(
+      new Set()
+    );
+
   const [
     twitchConnected,
     setTwitchConnected,
@@ -103,6 +110,7 @@ export function useTwitch({
         "twitch",
         "auth",
         {
+          validation_status: result.validation_status,
           connected:
             result.connected,
           expired:
@@ -263,6 +271,11 @@ export function useTwitch({
                 setTwitchEventSubStatus(
                   payload
                 );
+
+                // Refresh only local status; this does not initiate token recovery.
+                if (["connected", "relink_required", "missing_scopes"].includes(payload.status)) {
+                  void refreshTwitchAuthStatus();
+                }
 
                 recordDiagnosticEvent(
                   "twitch",
@@ -560,6 +573,106 @@ export function useTwitch({
           tags.username ||
           "Unknown";
 
+        const userId =
+          tags["user-id"] ??
+          null;
+
+        const profileKey =
+          `twitch:${userId ?? username.toLowerCase()}`;
+
+        if(
+          !chatUserProfilesRef.current.has(
+            profileKey
+          )
+        ) {
+          chatUserProfilesRef.current.set(
+            profileKey,
+            {
+              platform: "twitch",
+              userId,
+              username,
+              avatarUrl: null,
+
+              support: {
+                gifts: 0,
+                giftSubs: 0,
+                subs: 0,
+                bits: 0,
+              },
+            }
+          );
+        }
+
+        if(
+          userId &&
+          !chatUserProfilesRef.current.get(
+            profileKey
+          )?.avatarUrl &&
+          !twitchProfileRequestsRef.current.has(
+            userId
+          )
+        ) {
+          twitchProfileRequestsRef.current.add(
+            userId
+          );
+
+          void invoke<TwitchUserProfileResult>(
+            "twitch_user_profile",
+            {
+              clientId: TWITCH_CLIENT_ID,
+              userId,
+            }
+          )
+            .then((profile) => {
+              const cachedProfile =
+                chatUserProfilesRef.current.get(
+                  profileKey
+                );
+
+              if(cachedProfile) {
+                chatUserProfilesRef.current.set(
+                  profileKey,
+                  {
+                    ...cachedProfile,
+                    username:
+                      profile.display_name ||
+                      cachedProfile.username,
+                    avatarUrl:
+                      profile.profile_image_url ||
+                      null,
+                  }
+                );
+              }
+
+              if(profile.profile_image_url) {
+                setMessages((current) =>
+                  current.map((chatMessage) =>
+                    chatMessage.platform ===
+                      "twitch" &&
+                      chatMessage.userId === userId
+                      ? {
+                        ...chatMessage,
+                        avatarUrl:
+                          profile.profile_image_url,
+                      }
+                      : chatMessage
+                  )
+                );
+              }
+            })
+            .catch((error) => {
+              console.error(
+                "Twitch profiel ophalen mislukt:",
+                error
+              );
+            })
+            .finally(() => {
+              twitchProfileRequestsRef.current.delete(
+                userId
+              );
+            });
+        }
+
         recordChatMessage(
           "twitch"
         );
@@ -578,6 +691,12 @@ export function useTwitch({
 
               message,
 
+              userId,
+
+              avatarUrl:
+                chatUserProfilesRef.current.get(
+                  profileKey
+                )?.avatarUrl ?? null,
             },
           ]
         );

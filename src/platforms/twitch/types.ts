@@ -1,6 +1,14 @@
 
 
+export type TwitchUserProfileResult = {
+  id: string;
+  login: string;
+  display_name: string;
+  profile_image_url: string;
+};
+
 export type TwitchAuthStatus = {
+  validation_status: string;
   connected: boolean;
   linked_at: string | null;
   expected_expiry_at: string | null;
