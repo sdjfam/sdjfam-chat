@@ -86,7 +86,7 @@ function App() {
       />
       <div className="main-content-layout">
         <ChatMessages {...chat} {...twitch} {...youtube} {...tiktok} />
-        <AlertHistory alertHistory={alerts.alertHistory} />
+        <AlertHistory alertHistory={alerts.alertHistory} tiktokJoins={events.tiktokJoins} />
       </div>
       {settingsOpen && (
         <Settings setSettingsOpen={setSettingsOpen}>

@@ -3,12 +3,15 @@ import { PlatformIcon } from "../components/PlatformIcon";
 import type { Platform } from "../types/chat";
 import type { SdjfamEvent } from "../types/events";
 
+import type { TikTokJoin } from "../events/tiktokJoins";
+
 type AlertHistoryProps = {
+  tiktokJoins?: TikTokJoin[];
   alertHistory: SdjfamEvent[];
 };
 
 export function AlertHistory({
-  alertHistory
+  alertHistory, tiktokJoins = []
 }: AlertHistoryProps) {
   return (<aside className="alerts-panel">
     <div className="alerts-panel-header">
@@ -70,6 +73,17 @@ export function AlertHistory({
           )
         )}
       </div>
+    )}
+    {tiktokJoins.length > 0 && (
+      <ul className="tiktok-join-list" aria-label="Recente TikTok-joins">
+        {tiktokJoins.map(join => (
+          <li key={join.id} title={`${join.name} joined`}>
+            <span aria-hidden="true">👤</span>
+            <span className="tiktok-join-name">{join.test ? "TEST · " : ""}{join.name}</span>
+            <span>joined</span>
+          </li>
+        ))}
+      </ul>
     )}
   </aside>);
 }

@@ -1,3 +1,4 @@
+import { PlatformIcon } from "../components/PlatformIcon";
 import { useState } from "react";
 import { getPlatformLabel } from "../platforms/labels";
 import type { Platform } from "../types/chat";
@@ -32,7 +33,7 @@ export function EventTestPanel({ receiveEvent, listenerError, statsPreviewActive
       {listenerError && <p className="settings-message" role="alert">{listenerError}</p>}
       {(["twitch", "youtube", "tiktok"] as const).map(platform => (
         <fieldset key={platform} className="event-test-group">
-          <legend>{getPlatformLabel(platform)}</legend>
+          <legend><span className="settings-test-platform-icon" aria-hidden="true"><PlatformIcon platform={platform} /></span>{getPlatformLabel(platform)}</legend>
           <div className="event-test-buttons">
             {TEST_EVENTS.filter(option => option.platform === platform).map(option => (
               <button type="button" className="event-test-button" key={option.type}
@@ -43,7 +44,7 @@ export function EventTestPanel({ receiveEvent, listenerError, statsPreviewActive
       ))}
       {import.meta.env.DEV && (
         <fieldset className="event-test-group">
-          <legend>TikTok Live Stats — TEST-preview</legend>
+          <legend><span className="settings-test-platform-icon" aria-hidden="true"><PlatformIcon platform="tiktok" /></span>TikTok Live Stats — TEST-preview</legend>
           <p className="settings-message">Tijdelijke voorbeeldcijfers voor de topbar. Worden niet opgeslagen en veranderen je echte livegegevens niet. Na herstart staat de preview uit.</p>
           <div className="event-test-buttons">
             <button type="button" className="event-test-button" onClick={onEnableStatsPreview} disabled={statsPreviewActive}>TikTok stats-preview starten</button>

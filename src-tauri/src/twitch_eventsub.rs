@@ -31,6 +31,18 @@ const TWITCH_EVENTSUB_SUBSCRIPTIONS_URL: &str =
     "https://api.twitch.tv/helix/eventsub/subscriptions";
 
 
+const CHANNEL_POINTS_SUBSCRIPTION: &str = "channel.channel_points_custom_reward_redemption.add";
+
+fn channel_points_allowed(validation: &twitch_auth::Validation) -> bool {
+    validation.scopes.as_ref().is_some_and(|scopes| scopes.iter().any(|scope|
+        scope == "channel:read:redemptions" || scope == "channel:manage:redemptions"))
+}
+
+fn connected_message(channel_points: bool) -> &'static str {
+    if channel_points { "Twitch EventSub actief, inclusief Channel Points" }
+    else { "Twitch EventSub actief. Voor Channel Points ontbreekt toestemming: klik op Twitch opnieuw koppelen en geef toegang tot Channel Points. Bestaande events blijven actief." }
+}
+
 const REQUIRED_SCOPES: [&str; 3] = [
     "moderator:read:followers",
     "channel:read:subscriptions",
@@ -131,6 +143,7 @@ async fn register_subscriptions(
     access_token: &str,
     broadcaster_user_id: &str,
     session_id: &str,
+    channel_points: bool,
 ) -> Result<(), AuthError> {
     create_subscription(
         http_client,
@@ -232,6 +245,10 @@ async fn register_subscriptions(
     )
     .await?;
 
+    if channel_points {
+        create_subscription(http_client, client_id, access_token, session_id,
+            CHANNEL_POINTS_SUBSCRIPTION, "1", json!({ "broadcaster_user_id": broadcaster_user_id })).await?;
+    }
     Ok(())
 }
 
@@ -299,6 +316,22 @@ fn normalize_notification(
             .unwrap_or("twitch-event");
 
     match subscription_type {
+        CHANNEL_POINTS_SUBSCRIPTION => {
+            let redemption_id = event.get("id")?.as_str().filter(|id| !id.is_empty())?;
+            let broadcaster = event.get("broadcaster_user_id")?.as_str()?;
+            let reward = event.get("reward")?;
+            let title = reward.get("title")?.as_str().filter(|title| !title.trim().is_empty())?;
+            let cost = reward.get("cost")?.as_u64()?;
+            if cost > 9_007_199_254_740_991 { return None; }
+            Some(SdjfamEvent::new(format!("redemption:{broadcaster}:{redemption_id}"), Platform::Twitch, EventType::ChannelPointsRedemption)
+                .with_user(twitch_user(event, "user_id", "user_login", "user_name"))
+                .with_raw_event_type(subscription_type)
+                .with_metadata(json!({
+                    "redemption_id": redemption_id, "reward_id": reward.get("id"),
+                    "reward_title": title, "reward_cost": cost,
+                    "user_input": event.get("user_input").and_then(Value::as_str).unwrap_or("")
+                })))
+        }
         "channel.follow" => {
             Some(
                 SdjfamEvent::new(
@@ -587,11 +620,17 @@ static MESSAGE_IDS: std::sync::LazyLock<std::sync::Mutex<MessageIds>> =
 
 type EventSocket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+fn accept_notification(ids: &mut MessageIds, value: &Value) -> Option<SdjfamEvent> {
+    let event = normalize_notification(value)?;
+    // Redemptions keep their business identity even if delivered with a new message ID.
+    let id = if event.event_type == EventType::ChannelPointsRedemption { event.id.as_str() }
+        else { value.pointer("/metadata/message_id").and_then(Value::as_str).unwrap_or("") };
+    if ids.first(id) { Some(event) } else { None }
+}
+
 fn emit_notification(app: &AppHandle, value: &Value) {
-    let id = value.pointer("/metadata/message_id").and_then(Value::as_str).unwrap_or("");
-    if MESSAGE_IDS.lock().unwrap_or_else(|e| e.into_inner()).first(id) {
-        if let Some(event) = normalize_notification(value) { let _ = app.emit("sdjfam-event", &event); }
-    }
+    let event = accept_notification(&mut MESSAGE_IDS.lock().unwrap_or_else(|e| e.into_inner()), value);
+    if let Some(event) = event { let _ = app.emit("sdjfam-event", &event); }
 }
 
 // Twitch requires overlap during server-requested handover. Both sockets belong
@@ -652,6 +691,7 @@ async fn handover(old: &mut EventSocket, url: &str, mut deliver: impl FnMut(&Val
 async fn run_eventsub(app: &AppHandle, http: &reqwest::Client, client_id: &str,
     budget: &mut RetryBudget, recovered: bool) -> Result<(), AuthError> {
     let (mut token, validation) = validate_twitch_token(http, client_id).await?;
+    let channel_points = channel_points_allowed(&validation);
     let user_id = validation.user_id.ok_or(AuthError::Protocol)?;
     let mut replacement: Option<(EventSocket, Value)> = None;
     let mut transferred = false;
@@ -700,12 +740,12 @@ async fn run_eventsub(app: &AppHandle, http: &reqwest::Client, client_id: &str,
                                         keepalive = Duration::from_secs(value.pointer("/payload/session/keepalive_timeout_seconds")
                                             .and_then(Value::as_u64).unwrap_or(30).clamp(10, 600) + 5);
                                         if !transferred {
-                                            register_subscriptions(http, client_id, &token.access_token, &user_id, session_id).await?;
+                                            register_subscriptions(http, client_id, &token.access_token, &user_id, session_id, channel_points).await?;
                                         }
                                         deadline = Instant::now() + keepalive;
                                         healthy_since = Some(Instant::now());
                                         if recovered { twitch_auth::log("EventSub recovered"); }
-                                        emit_status(app, "connected", "Twitch EventSub actief");
+                                        emit_status(app, "connected", connected_message(channel_points));
                                     }
                                     "notification" if welcomed => emit_notification(app, &value),
                                     "session_reconnect" if welcomed => {
@@ -905,4 +945,81 @@ mod recovery_tests {
         new.close(None).await.unwrap();old_server.await.unwrap();new_server.await.unwrap();
     }
 
+}
+
+
+#[cfg(test)]
+mod channel_points_tests {
+    use super::*;
+    fn notification(message_id: &str, redemption_id: &str) -> Value {
+        json!({"metadata":{"message_type":"notification","message_id":message_id,"subscription_type":CHANNEL_POINTS_SUBSCRIPTION},
+            "payload":{"event":{"id":redemption_id,"broadcaster_user_id":"broadcaster","user_id":"42","user_login":"piet","user_name":"Piet",
+                "user_input":"Gebruik sniper", "reward":{"id":"reward","title":"Kies mijn loadout","cost":2000}}}})
+    }
+    #[test]
+    fn normalizes_custom_reward_with_stable_identity_and_exact_fields() {
+        let event = normalize_notification(&notification("delivery", "redemption")).unwrap();
+        assert_eq!(event.event_type, EventType::ChannelPointsRedemption);
+        assert_eq!(event.id, "redemption:broadcaster:redemption");
+        assert_eq!(event.user.unwrap().display_name.as_deref(), Some("Piet"));
+        assert_eq!(event.metadata["reward_title"], "Kies mijn loadout");
+        assert_eq!(event.metadata["reward_cost"], 2000);
+        assert_eq!(event.metadata["user_input"], "Gebruik sniper");
+        assert_eq!(serde_json::to_value(EventType::ChannelPointsRedemption).unwrap(), "channel_points_redemption");
+    }
+    #[test]
+    fn invalid_reward_does_not_poison_dedup_and_optional_input_is_empty() {
+        let mut ids = MessageIds::default();
+        let mut value = notification("delivery", "redemption");
+        value["payload"]["event"]["reward"]["cost"] = json!(-1);
+        assert!(accept_notification(&mut ids, &value).is_none());
+        value["payload"]["event"]["reward"]["cost"] = json!(500);
+        value["payload"]["event"].as_object_mut().unwrap().remove("user_input");
+        assert_eq!(accept_notification(&mut ids, &value).unwrap().metadata["user_input"], "");
+        assert!(accept_notification(&mut ids, &notification("new-delivery", "redemption")).is_none());
+    }
+    #[test]
+    fn existing_scopes_keep_existing_events_and_new_scope_enables_redemptions() {
+        let mut validation = twitch_auth::Validation { client_id: "client".into(), user_id: Some("user".into()), scopes: Some(REQUIRED_SCOPES.iter().map(|s| s.to_string()).collect()) };
+        assert!(!channel_points_allowed(&validation));
+        assert!(connected_message(false).contains("opnieuw koppelen"));
+        validation.scopes.as_mut().unwrap().push("channel:read:redemptions".into());
+        assert!(channel_points_allowed(&validation));
+        assert!(crate::TWITCH_EVENTSUB_SCOPES.split_whitespace().any(|scope| scope == "channel:read:redemptions"));
+        assert!(!REQUIRED_SCOPES.contains(&"channel:read:redemptions"));
+    }
+    #[test]
+    fn all_existing_twitch_notifications_still_normalize_and_deduplicate() {
+        for kind in ["channel.follow", "channel.subscribe", "channel.subscription.gift", "channel.cheer", "channel.raid", "stream.online", "stream.offline"] {
+            let mut value = notification(kind, "unused");
+            value["metadata"]["subscription_type"] = json!(kind);
+            let mut ids = MessageIds::default();
+            assert!(accept_notification(&mut ids, &value).is_some(), "{kind}");
+            assert!(accept_notification(&mut ids, &value).is_none());
+        }
+    }
+    #[tokio::test]
+    async fn websocket_reconnect_redelivery_keeps_one_redemption() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for delivery in ["before-reconnect", "after-reconnect"] {
+                let (tcp, _) = listener.accept().await.unwrap();
+                let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+                socket.send(Message::Text(notification(delivery, "same-redemption").to_string().into())).await.unwrap();
+                let _ = socket.next().await;
+            }
+        });
+        let mut ids = MessageIds::default();
+        let mut delivered = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = connect_async(&url).await.unwrap();
+            let message = timeout(Duration::from_secs(3), socket.next()).await.unwrap().unwrap().unwrap();
+            let value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+            if let Some(event) = accept_notification(&mut ids, &value) { delivered.push(event); }
+            socket.close(None).await.unwrap();
+        }
+        server.await.unwrap();
+        assert_eq!(delivered.len(), 1);
+    }
 }

@@ -63,13 +63,16 @@ jobs:
           tagName: v__VERSION__
           releaseName: "SDJFAM Chat v__VERSION__"
           releaseBody: |
-            Nieuw in SDJFAM Chat v0.1.8:
+            Nieuw in SDJFAM Chat v0.1.9:
 
-            - Automatisch Twitch-tokenherstel en betrouwbaarder EventSub-herstel
-            - Veilige EventSub-overdracht bij Twitch-reconnects
-            - Duidelijk onderscheid tussen tijdelijke fouten en opnieuw koppelen
-            - Twitch-avatars in de chat
-            - Compacte TikTok Live Stats en uniforme live-events
+            - TikTok JOIN-events: de laatste vijf kijkers compact onder Alerts & Gifts
+            - Twitch Channel Points: rewardnaam, punten en eventuele invoer uitsluitend in chat
+            - Bescherming tegen dubbele joins en redemptions, ook bij EventSub-reconnects
+            - Hergebruikte platformiconen bij de Settings-testgroepen
+
+            Voor Twitch Channel Points kan opnieuw koppelen nodig zijn om toestemming
+            voor channel:read:redemptions te geven. Bestaande Twitch-events blijven
+            werken wanneer deze extra toestemming nog ontbreekt.
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

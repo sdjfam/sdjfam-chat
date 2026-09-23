@@ -11,6 +11,8 @@ export type ChatMessage = {
   username: string;
   message: string;
 
+  channelPoints?: { rewardTitle: string; cost: number; userInput: string };
+
   userId?: string | null;
   avatarUrl?: string | null;
 

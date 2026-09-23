@@ -37,7 +37,7 @@ test('real connector lifecycle names are subscribed once and fully detached', ()
   connection.state = { roomId: 'room' };
   const received = [];
   const detach = attachTikTokEvents(connection, { WebcastEvent, ControlEvent }, e => received.push(e), () => 100);
-  assert.equal(connection.eventNames().length, 8);
+  assert.equal(connection.eventNames().length, 9);
   for (const event of connection.eventNames()) assert.equal(connection.listenerCount(event), 1);
   connection.emit(ControlEvent.CONNECTED, connection.state);
   connection.emit(WebcastEvent.LIKE, { count: 1, total: '100' });
@@ -49,4 +49,28 @@ test('real connector lifecycle names are subscribed once and fully detached', ()
   assert.equal(received[3].status, 'ended');
   detach();
   assert.equal(connection.eventNames().length, 0);
+});
+
+
+test('MEMBER JOINED uses the nested viewer, never the operator or a subscription action', () => {
+  const connection = new EventEmitter(), received = [];
+  const detach = attachTikTokEvents(connection, { WebcastEvent, ControlEvent }, e => received.push(e));
+  const payload = { action: 1, common: { msgId: 'join1', roomId: 'room' }, user: { id: '42', nickname: 'Juiste kijker', displayId: 'juiste_kijker' }, operator: { nickname: 'Verkeerde operator' } };
+  connection.emit(WebcastEvent.MEMBER, payload);
+  connection.emit(WebcastEvent.MEMBER, { ...payload, action: 3 });
+  assert.equal(received.length, 1);
+  assert.equal(received[0].type, 'join');
+  assert.equal(received[0].username, 'Juiste kijker');
+  assert.equal(received[0].uniqueId, 'juiste_kijker');
+  assert.equal(received[0].userId, '42');
+  assert.equal(received[0].eventId, 'join1');
+  assert.equal(normalize('join', { action: 1, user: { displayId: 'handle' } }, 'room').username, 'handle');
+  detach();
+  assert.equal(connection.listenerCount(WebcastEvent.MEMBER), 0);
+});
+
+test('invalid member actions and nameless/malformed users are safely ignored', () => {
+  for (const data of [null, {}, { action: 0, user: { nickname: 'Someone' } }, { action: 1 }, { action: 1, user: { nickname: {}, displayId: 5 } }]) {
+    assert.equal(normalize('join', data, 'room'), null);
+  }
 });

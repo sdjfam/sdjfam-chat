@@ -16,6 +16,7 @@ pub enum Platform {
 #[serde(rename_all = "snake_case")]
 pub enum EventType {
     ChatMessage,
+    ChannelPointsRedemption,
     Follow,
     Subscription,
     GiftSubscription,

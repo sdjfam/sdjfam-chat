@@ -1,3 +1,4 @@
+import { toTikTokJoinEvent } from "./joinEvents";
 import { usePlatformLiveStats } from "../../stats/usePlatformLiveStats";
 import { toTikTokStatsEvent } from "./liveStatsEvents";
 import type { Child } from "@tauri-apps/plugin-shell";
@@ -206,6 +207,11 @@ export function useTikTok({
               output
             ) as TikTokSidecarPayload;
 
+          if (payload.type === "join") {
+            const event = toTikTokJoinEvent(payload);
+            if (event) receiveEvent(event);
+            return;
+          }
           recordStats(toTikTokStatsEvent(payload));
           if (payload.type === "session" && payload.platform === "tiktok") {
             const connected = payload.status === "connected";

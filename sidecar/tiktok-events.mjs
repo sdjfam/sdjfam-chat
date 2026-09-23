@@ -13,6 +13,7 @@ function id(value) {
 
 // Connector 2.4.4 uses protobuf v3; the older field names are still accepted.
 export function normalizeTikTokEvent(type, data, roomId, now = Date.now()) {
+  if (!data || typeof data !== "object") return null;
   const base = {
     type, platform: "tiktok", schemaVersion: 1,
     roomId: id(data.common?.roomId) || id(roomId),
@@ -24,6 +25,15 @@ export function normalizeTikTokEvent(type, data, roomId, now = Date.now()) {
   const uniqueId = user?.uniqueId || user?.displayId || data.uniqueId || null;
   const username = user?.nickname || data.nickname || uniqueId || "TikTok";
   switch (type) {
+    case "join": {
+      // Installed protobuf v3 MemberMessageAction: JOINED=1, SUBSCRIBED=3.
+      if (data.action !== 1) return null;
+      const text = value => typeof value === "string" ? value.trim() : "";
+      const handle = text(user?.uniqueId) || text(user?.displayId);
+      const name = text(user?.nickname) || handle;
+      if (!name) return null;
+      return { ...base, userId, uniqueId: handle || null, username: name };
+    }
     case "chat": {
       const message = typeof data.content === "string" ? data.content : "";
       return message.trim() ? { ...base, userId, uniqueId, username, message } : null;
@@ -79,7 +89,7 @@ export function attachTikTokEvents(connection, { WebcastEvent, ControlEvent }, e
   on(ControlEvent.DISCONNECTED, () => session("disconnected"));
   on(WebcastEvent.STREAM_END, () => session("ended"));
   for (const [event, type] of [
-    [WebcastEvent.CHAT, "chat"], [WebcastEvent.ROOM_USER, "viewerCount"],
+    [WebcastEvent.MEMBER, "join"], [WebcastEvent.CHAT, "chat"], [WebcastEvent.ROOM_USER, "viewerCount"],
     [WebcastEvent.GIFT, "gift"], [WebcastEvent.LIKE, "like"], [WebcastEvent.FOLLOW, "follow"],
   ]) {
     on(event, data => {

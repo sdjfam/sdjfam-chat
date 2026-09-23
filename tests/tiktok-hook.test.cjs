@@ -61,3 +61,17 @@ test('a sidecar spawn resolving after unmount is killed and cannot receive event
   assert.equal(h.hook.tiktokChildRef.current, null);
   assert.equal(h.command.stdout.listenerCount('data'), 0);
 });
+
+
+test('join uses the existing sidecar listener and event callback without changing chat or stats', async () => {
+  const h = harness(); await h.ready();
+  h.emit({ type: 'join', platform: 'tiktok', eventId: 'join1', roomId: 'room', userId: '42', uniqueId: 'viewer', username: 'Viewer Name' });
+  assert.equal(h.alerts.length, 1);
+  assert.equal(h.alerts[0].event_type, 'viewer_join');
+  assert.equal(h.alerts[0].user.display_name, 'Viewer Name');
+  assert.equal(h.messages.length, 0);
+  assert.equal(h.records.length, 0);
+  h.emit({ type: 'join', platform: 'tiktok', eventId: 'invalid', username: {} });
+  assert.equal(h.alerts.length, 1);
+  h.cleanup();
+});

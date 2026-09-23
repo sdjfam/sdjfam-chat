@@ -68,7 +68,7 @@ export function ChatMessages({
         {messages.map(
           (chat) => (
             <div
-              className={`chat-message ${chat.platform}`}
+              className={`chat-message ${chat.platform}${chat.channelPoints ? " channel-points-message" : ""}`}
               key={chat.id}
             >
               <span
@@ -98,6 +98,7 @@ export function ChatMessages({
               )}
 
               <div className="message-content">
+                {chat.channelPoints && <span className="channel-points-label">◈ Channel Points</span>}
                 <strong>
                   {chat.username}
                 </strong>
@@ -105,6 +106,9 @@ export function ChatMessages({
                 <p>
                   {chat.message}
                 </p>
+                {chat.channelPoints?.userInput.trim() && (
+                  <blockquote className="channel-points-input">{chat.channelPoints.userInput}</blockquote>
+                )}
               </div>
             </div>
           )

@@ -1,4 +1,4 @@
-const TWITCH_EVENTSUB_SCOPES: &str = "moderator:read:followers channel:read:subscriptions bits:read";
+const TWITCH_EVENTSUB_SCOPES: &str = "moderator:read:followers channel:read:subscriptions bits:read channel:read:redemptions";
 pub mod youtube_api {
     tonic::include_proto!("youtube.api.v3");
 }
