@@ -75,3 +75,16 @@ test('join uses the existing sidecar listener and event callback without changin
   assert.equal(h.alerts.length, 1);
   h.cleanup();
 });
+
+
+test('active streak reaches event history but only final is eligible for Live Stats', async () => {
+  const h = harness(); await h.ready();
+  const base = { type: 'gift', platform: 'tiktok', schemaVersion: 1, roomId: 'room', receivedAt: 1,
+    eventId: 'stable-streak', userId: '42', username: 'Piet', giftName: 'Rose', giftType: 1, diamondCount: 1 };
+  for (const repeatCount of [1, 2, 5, 10]) h.emit({ ...base, repeatCount, repeatEnd: false });
+  h.emit({ ...base, repeatCount: 10, repeatEnd: true });
+  assert.deepEqual(h.records.filter(Boolean).map(e => e.count), [10]);
+  assert.deepEqual(h.alerts.map(e => e.metadata.repeat_count), [1, 2, 5, 10, 10]);
+  assert.ok(h.alerts.every(e => e.id === 'stable-streak' && e.user.display_name === 'Piet'));
+  assert.equal(h.messages.length, 0); h.cleanup();
+});

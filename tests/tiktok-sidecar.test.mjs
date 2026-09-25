@@ -22,11 +22,13 @@ test('nested users retain chat author and stable event identity', () => {
   assert.equal(event.roomId, '9876543210987654321');
   assert.equal(event.eventId, 'message');
 });
-test('cumulative gift streaks emit only final totals with stable group identity', () => {
+test('cumulative gift streak progress and final share stable identity without summing', () => {
   const gift = { user: { id: 'u' }, groupId: 'group', gift: { id: 'rose', type: 1, name: 'Rose', diamondCount: 1 }, repeatCount: 5 };
-  assert.equal(normalize('gift', { ...gift, repeatEnd: 0 }, 'r'), null);
+  const progress = normalize('gift', { ...gift, repeatEnd: 0 }, 'r');
+  assert.equal(progress.repeatCount, 5); assert.equal(progress.repeatEnd, false);
   const final = normalize('gift', { ...gift, repeatEnd: 1 }, 'r');
   assert.equal(final.repeatCount, 5);
+  assert.equal(final.eventId, progress.eventId);
   assert.equal(final.diamondCount, 1);
   assert.equal(final.giftName, 'Rose');
   assert.equal(final.eventId, normalize('gift', { ...gift, repeatEnd: true }, 'r').eventId);
@@ -72,5 +74,32 @@ test('MEMBER JOINED uses the nested viewer, never the operator or a subscription
 test('invalid member actions and nameless/malformed users are safely ignored', () => {
   for (const data of [null, {}, { action: 0, user: { nickname: 'Someone' } }, { action: 1 }, { action: 1, user: { nickname: {}, displayId: 5 } }]) {
     assert.equal(normalize('join', data, 'room'), null);
+  }
+});
+
+
+test('streak keys separate rooms, senders, gifts and groups; missing identity waits for final', () => {
+  const payload = { common: { msgId: 'delivery' }, user: { id: 'piet', nickname: 'Piet' }, gift: { id: 'rose', type: 1, name: 'Rose' }, groupId: 'group1', repeatCount: 1, repeatEnd: 0 };
+  const base = normalize('gift', payload, 'room1');
+  assert.equal(base.username, 'Piet'); assert.equal(base.giftName, 'Rose');
+  const variants = [
+    normalize('gift', payload, 'room2'),
+    normalize('gift', { ...payload, user: { id: 'jan' } }, 'room1'),
+    normalize('gift', { ...payload, gift: { id: 'heart', type: 1 } }, 'room1'),
+    normalize('gift', { ...payload, groupId: 'group2' }, 'room1'),
+  ];
+  assert.equal(new Set([base, ...variants].map(e => e.eventId)).size, 5);
+  assert.equal(normalize('gift', { ...payload, groupId: undefined }, 'room1'), null);
+  const final = normalize('gift', { ...payload, groupId: undefined, repeatEnd: 1 }, 'room1');
+  assert.equal(final.eventId, 'delivery');
+});
+
+test('observed stream gift fields replay without inventing sender or streak details', () => {
+  // Only these four fields were recorded in the real log; no sender/streak inference.
+  for (const [giftName, giftId] of [['Heart Me', '7934'], ['Popular Vote', '13651']]) {
+    const event = normalize('gift', { giftName, giftId, repeatCount: 1, diamondCount: 1 }, null);
+    assert.equal(event.giftName, giftName); assert.equal(event.giftId, giftId);
+    assert.equal(event.repeatCount, 1); assert.equal(event.diamondCount, 1);
+    assert.equal(event.userId, null); assert.equal(event.giftType, null);
   }
 });

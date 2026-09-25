@@ -1,3 +1,4 @@
+import { getTikTokGiftDetails, isTikTokGiftInProgress } from "../platforms/tiktok/giftEvents";
 import { getAlertContent, isTestEvent } from "../events/eventPresentation";
 import { PlatformIcon } from "../components/PlatformIcon";
 import type { Platform } from "../types/chat";
@@ -60,7 +61,7 @@ export function AlertHistory({
 
               <div className="alert-history-content">
                 <strong>
-                  {isTestEvent(event) ? "TEST · " : ""}{getAlertContent(event)?.label || event.event_type}
+                  {isTestEvent(event) ? "TEST · " : ""}{getTikTokGiftDetails(event) ? `🎁 ${getTikTokGiftDetails(event)}` : getAlertContent(event)?.label || event.event_type}
                 </strong>
 
                 <span>
@@ -68,6 +69,7 @@ export function AlertHistory({
                     event.user?.username ||
                     event.platform}
                 </span>
+                {isTikTokGiftInProgress(event) && <span>Streak bezig…</span>}
               </div>
             </div>
           )
@@ -75,7 +77,7 @@ export function AlertHistory({
       </div>
     )}
     {tiktokJoins.length > 0 && (
-      <ul className="tiktok-join-list" aria-label="Recente TikTok-joins">
+      <ul className="tiktok-join-list" aria-label="Actuele TikTok-join">
         {tiktokJoins.map(join => (
           <li key={join.id} title={`${join.name} joined`}>
             <span aria-hidden="true">👤</span>

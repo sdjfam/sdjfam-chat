@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { isTikTokGiftInProgress } from "../platforms/tiktok/giftEvents";
 import type { SdjfamEvent } from "../types/events";
 
 export function useAlerts() {
@@ -24,21 +25,21 @@ export function useAlerts() {
     event: SdjfamEvent
   ) => {
     // Voeg het event toe aan de bestaande overlay-wachtrij.
-    setAlertQueue(
-      (currentQueue) => [
-        ...currentQueue,
-        event,
-      ]
-    );
+    if (!isTikTokGiftInProgress(event)) {
+      setAlertQueue(currentQueue => [...currentQueue, event]);
+    }
 
     // Bewaar het event ook in de zichtbare Alerts & Gifts-history.
     // Nieuwste event staat bovenaan.
     // Maximaal 100 events bewaren.
     setAlertHistory(
-      (currentHistory) => [
-        event,
-        ...currentHistory,
-      ].slice(0, 100)
+      currentHistory => {
+        if (event.platform === "tiktok" && event.event_type === "gift") {
+          const index = currentHistory.findIndex(old => old.platform === "tiktok" && old.id === event.id);
+          if (index >= 0) return currentHistory.map((old, i) => i === index ? event : old);
+        }
+        return [event, ...currentHistory].slice(0, 100);
+      }
     );
   }, []);
 

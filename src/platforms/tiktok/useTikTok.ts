@@ -1,3 +1,4 @@
+import { toTikTokGiftEvent } from "./giftEvents";
 import { toTikTokJoinEvent } from "./joinEvents";
 import { usePlatformLiveStats } from "../../stats/usePlatformLiveStats";
 import { toTikTokStatsEvent } from "./liveStatsEvents";
@@ -306,70 +307,8 @@ export function useTikTok({
             payload.type === "gift" &&
             payload.platform === "tiktok"
           ) {
-            const repeatCount =
-              Math.max(
-                1,
-                payload.repeatCount ?? 1
-              );
-
-            const giftName =
-              payload.giftName ??
-              "TikTok Gift";
-
-            recordDiagnosticEvent(
-              "tiktok",
-              "gift",
-              {
-                gift: giftName,
-                gift_id:
-                  payload.giftId ?? null,
-                count: repeatCount,
-                diamonds:
-                  payload.diamondCount ?? null,
-              }
-            );
-
-            const giftEvent: SdjfamEvent = {
-              id:
-                payload.eventId || `tiktok-gift-${Date.now()}-${Math.random()
-                  .toString(36)
-                  .slice(2, 8)}`,
-              platform: "tiktok",
-              event_type: "gift",
-              user: {
-                id:
-                  payload.uniqueId ?? null,
-                username:
-                  payload.uniqueId ??
-                  payload.username ??
-                  null,
-                display_name:
-                  payload.username ??
-                  payload.uniqueId ??
-                  "TikTok Viewer",
-              },
-              message:
-                repeatCount > 1
-                  ? `${giftName} x${repeatCount}`
-                  : giftName,
-              amount: null,
-              raw_event_type:
-                "tiktok_gift",
-              metadata: {
-                gift_name:
-                  giftName,
-                gift_id:
-                  payload.giftId ?? null,
-                repeat_count:
-                  repeatCount,
-                diamond_count:
-                  payload.diamondCount ?? null,
-              },
-            };
-
-            receiveEvent(
-              giftEvent
-            );
+            const giftEvent = toTikTokGiftEvent(payload);
+            if (giftEvent) receiveEvent(giftEvent);
 
             return;
           }

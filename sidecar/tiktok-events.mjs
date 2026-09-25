@@ -55,16 +55,25 @@ export function normalizeTikTokEvent(type, data, roomId, now = Date.now()) {
       const gift = data.giftDetails || data.gift;
       const giftType = safeCount(data.giftType ?? gift?.giftType ?? gift?.type);
       const repeatEnd = data.repeatEnd === true || data.repeatEnd === 1;
-      // A streak emits cumulative counts and one final event; process it once.
-      if (giftType === 1 && !repeatEnd) return null;
+      // Active counts are presentation-only; only repeatEnd contributes to stats/alerts.
       const repeatCount = safeCount(data.repeatCount);
       if (repeatCount === null || repeatCount < 1) return null;
       const groupId = id(data.groupId);
+      const text = value => typeof value === "string" ? value.trim() : "";
+      const handle = text(user?.uniqueId) || text(user?.displayId) || text(data.uniqueId);
+      const sender = userId || handle;
+      const giftId = data.giftId ?? gift?.giftId ?? gift?.id ?? null;
+      const validGiftId = id(giftId) || (Number.isSafeInteger(giftId) && giftId > 0 ? String(giftId) : null);
+      const streakId = giftType === 1 && groupId && sender && validGiftId
+        ? `gift:${JSON.stringify([base.roomId, sender, validGiftId, groupId])}` : null;
+      // Without real streak identity, wait for the final event instead of guessing a merge.
+      if (giftType === 1 && !repeatEnd && !streakId) return null;
       return {
-        ...base, userId, uniqueId, username,
-        eventId: giftType === 1 && groupId ? `gift:${userId || uniqueId || "unknown"}:${groupId}:${data.giftId ?? gift?.id ?? "unknown"}` : base.eventId,
-        giftName: data.giftName || gift?.giftName || gift?.name || "TikTok Gift",
-        giftId: data.giftId ?? gift?.giftId ?? gift?.id ?? null,
+        ...base, userId, uniqueId: handle || null,
+        username: text(user?.nickname) || text(data.nickname) || handle || "TikTok Viewer",
+        eventId: streakId || base.eventId,
+        giftName: text(data.giftName) || text(gift?.giftName) || text(gift?.name) || "TikTok Gift",
+        giftId: validGiftId,
         repeatCount, repeatEnd, giftType, groupId,
         diamondCount: safeCount(data.diamondCount ?? gift?.diamondCount),
       };

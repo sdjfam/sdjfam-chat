@@ -63,16 +63,16 @@ jobs:
           tagName: v__VERSION__
           releaseName: "SDJFAM Chat v__VERSION__"
           releaseBody: |
-            Nieuw in SDJFAM Chat v0.1.9:
+            Nieuw in SDJFAM Chat v0.1.10:
 
-            - TikTok JOIN-events: de laatste vijf kijkers compact onder Alerts & Gifts
-            - Twitch Channel Points: rewardnaam, punten en eventuele invoer uitsluitend in chat
-            - Bescherming tegen dubbele joins en redemptions, ook bij EventSub-reconnects
-            - Hergebruikte platformiconen bij de Settings-testgroepen
+            - TikTok JOIN: één actuele kijker, direct vervangen en na vijf seconden verborgen
+            - TikTok gifts: afzender, echte giftnaam en aantal in Alerts & Gifts
+            - Giftstreaks werken dezelfde regel bij zonder cumulatieve aantallen op te tellen
+            - Onafhankelijke verwerking van gelijktijdige senders en giftstreaks
+            - Gerichte TikTok JOIN- en giftdiagnostics voor de volgende livestream
 
-            Voor Twitch Channel Points kan opnieuw koppelen nodig zijn om toestemming
-            voor channel:read:redemptions te geven. Bestaande Twitch-events blijven
-            werken wanneer deze extra toestemming nog ontbreekt.
+            Twitch Channel Points blijven uitsluitend in chat. De echte TikTok-livecontrole
+            volgt tijdens de volgende livestream; lokale tests en builds zijn geslaagd.
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

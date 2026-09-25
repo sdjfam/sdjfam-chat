@@ -6,7 +6,10 @@ import type { SdjfamEvent } from "../types/events";
 import { createEventDeduplicator, getAlertContent, isTestEvent } from "./eventPresentation";
 
 import { channelPointChatMessage } from "./channelPoints";
-import { createTikTokJoinBuffer, JOIN_BATCH_MS, type TikTokJoin } from "./tiktokJoins";
+import { createTikTokJoinBuffer, type TikTokJoin } from "./tiktokJoins";
+
+import { createTikTokGiftDeduplicator, isTikTokGiftInProgress } from "../platforms/tiktok/giftEvents";
+import { createTikTokEventDiagnostics } from "../platforms/tiktok/eventDiagnostics";
 
 type EventOptions = {
   pushAlert: (event: SdjfamEvent) => void;
@@ -15,21 +18,30 @@ type EventOptions = {
 
 export function usePlatformEvents({ pushAlert, setMessages }: EventOptions) {
   const accept = useRef(createEventDeduplicator());
-  const joinBuffer = useRef(createTikTokJoinBuffer());
   const [tiktokJoins, setTikTokJoins] = useState<TikTokJoin[]>([]);
+  const joinBuffer = useRef<ReturnType<typeof createTikTokJoinBuffer> | null>(null);
+  if (!joinBuffer.current) joinBuffer.current = createTikTokJoinBuffer(setTikTokJoins);
+  const acceptGift = useRef(createTikTokGiftDeduplicator());
+  const logTikTokEvent = useRef(createTikTokEventDiagnostics());
   const [listenerError, setListenerError] = useState("");
   const receiveEvent = useCallback((event: SdjfamEvent) => {
     if (!["twitch", "youtube", "tiktok"].includes(event.platform) || event.event_type === "chat_message" || !event.id) return false;
-    if (event.platform === "tiktok" && event.event_type === "viewer_join") return joinBuffer.current.add(event);
+    if (event.platform === "tiktok" && event.event_type === "viewer_join") {
+      const accepted = joinBuffer.current!.add(event);
+      if (accepted) logTikTokEvent.current(event);
+      return accepted;
+    }
     const redemption = channelPointChatMessage(event);
     if (event.event_type === "channel_points_redemption" && !redemption) return false;
-    if (!accept.current(event)) return false;
+    const tiktokGift = event.platform === "tiktok" && event.event_type === "gift";
+    if (!(tiktokGift ? acceptGift.current(event) : accept.current(event))) return false;
     const test = isTestEvent(event);
     const content = getAlertContent(event);
     if (!test) {
       if (event.platform === "twitch") incrementDiagnosticCounter("eventsub_events");
-      recordDiagnosticEvent(event.platform, event.event_type, { source: "platform_event", amount: event.amount?.value ?? null });
-      if (content) incrementDiagnosticCounter("alerts");
+      if (tiktokGift) logTikTokEvent.current(event);
+      else recordDiagnosticEvent(event.platform, event.event_type, { source: "platform_event", amount: event.amount?.value ?? null });
+      if (content && !isTikTokGiftInProgress(event)) incrementDiagnosticCounter("alerts");
     }
     if (redemption) {
       // Stable redemption IDs also guard redelivery after the bounded cache evicts an ID.
@@ -69,11 +81,7 @@ export function usePlatformEvents({ pushAlert, setMessages }: EventOptions) {
   }, [receiveEvent]);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      const next = joinBuffer.current.flush();
-      if (next) setTikTokJoins(next);
-    }, JOIN_BATCH_MS);
-    return () => clearInterval(timer);
+    return () => joinBuffer.current?.dispose();
   }, []);
 
   return { receiveEvent, listenerError, tiktokJoins };
