@@ -88,10 +88,11 @@ jobs:
           tagName: v__VERSION__
           releaseName: "SDJFAM Chat v__VERSION__"
           releaseBody: |
-            Nieuw in SDJFAM Chat v0.1.12:
+            Nieuw in SDJFAM Chat v0.1.13:
 
             - TikTok helper wordt expliciet naast de app meegeleverd en offline gecontroleerd
-            - YouTube beëindigde chatstreams stoppen; discovery wacht op een nieuwe actieve livechat
+            - YouTube streamsluiting: oplopende backoff, verse live-discovery en hervatten vanaf de laatste cursor
+            - Werkelijk offline chats stoppen; nieuwe livestreams worden automatisch ontdekt
             - Twitch EventSub herstelt de actuele status na frontendherstart zonder dubbele worker
             - Twitch viewers worden direct na EventSub-herstel opnieuw opgehaald
             - Token-recovery, Channel Points, chat en TikTok gifts blijven behouden

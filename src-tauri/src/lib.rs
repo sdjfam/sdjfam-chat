@@ -1183,6 +1183,26 @@ fn create_chat_message_event(
 // YOUTUBE GRPC STREAM
 // =========================================================
 
+// Keep only the current chat cursor in memory; never log or persist OAuth or pagination tokens.
+static YOUTUBE_CHAT_CURSOR: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+fn youtube_resume_token(chat_id: &str) -> Option<String> {
+    YOUTUBE_CHAT_CURSOR.lock().unwrap_or_else(|e| e.into_inner())
+        .as_ref().filter(|(id, _)| id == chat_id).map(|(_, token)| token.clone())
+}
+#[cfg(test)]
+mod youtube_resume_tests {
+    use super::*;
+    #[test]
+    fn reconnect_keeps_cursor_but_new_livestream_never_inherits_it() {
+        *YOUTUBE_CHAT_CURSOR.lock().unwrap() = Some(("chat-a".into(), "page-cursor".into()));
+        assert_eq!(youtube_resume_token("chat-a"), Some("page-cursor".into()));
+        assert_eq!(youtube_resume_token("chat-b"), None);
+        *YOUTUBE_CHAT_CURSOR.lock().unwrap() = None;
+        assert_eq!(youtube_resume_token("chat-a"), None);
+    }
+}
+
+
 async fn run_youtube_chat_stream(
     app: tauri::AppHandle,
     live_chat_id: String,
@@ -1207,11 +1227,8 @@ async fn run_youtube_chat_stream(
     let http_client =
         create_http_client()?;
 
-    let mut next_page_token:
-        Option<String> = None;
-
-    let mut discard_initial_history =
-        true;
+    let mut next_page_token = youtube_resume_token(&live_chat_id);
+    let mut discard_initial_history = next_page_token.is_none();
 
     loop {
         if YOUTUBE_CHAT_STREAM_STOP_REQUESTED
@@ -1358,14 +1375,12 @@ async fn run_youtube_chat_stream(
                             .next_page_token
                             .clone()
                     {
-                        next_page_token =
-                            Some(token);
+                        *YOUTUBE_CHAT_CURSOR.lock().unwrap_or_else(|e| e.into_inner()) = Some((live_chat_id.clone(), token.clone()));
+                        next_page_token = Some(token);
                     }
 
-                    if response
-                        .offline_at
-                        .is_some()
-                    {
+                    if response.offline_at.is_some() {
+                        *YOUTUBE_CHAT_CURSOR.lock().unwrap_or_else(|e| e.into_inner()) = None;
                         let _ =
                             app.emit(
                                 YOUTUBE_CHAT_STATUS_EVENT,

@@ -13,6 +13,10 @@ type YouTubeOptions = {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 };
 
+export function youtubeRetryDelay(attempts: number) {
+  return Math.min(60000 * 2 ** Math.max(0, attempts - 1), 900000);
+}
+
 export function useYouTube({
   setMessages
 }: YouTubeOptions) {
@@ -60,7 +64,9 @@ export function useYouTube({
   ] =
     useState(false);
 
-  const endedChatIdsRef = useRef(new Set<string>());
+  const endedChatIdsRef = useRef(new Map<string, { retryAt: number; attempts: number }>());
+  const connectedAtRef = useRef<number | null>(null);
+  const messageChatIdRef = useRef<string | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
   activeChatIdRef.current = youtubeLiveChatId;
 
@@ -347,7 +353,7 @@ export function useYouTube({
           return;
         }
 
-        if (endedChatIdsRef.current.has(result.live_chat_id)) {
+        if ((endedChatIdsRef.current.get(result.live_chat_id)?.retryAt ?? 0) > Date.now()) {
           setYoutubeStatus("YouTube wacht op een nieuwe actieve livechat");
           return;
         }
@@ -585,7 +591,10 @@ export function useYouTube({
       | UnlistenFn
       | null = null;
 
-    youtubeMessageIdsRef.current.clear();
+    if (messageChatIdRef.current !== youtubeLiveChatId) {
+      youtubeMessageIdsRef.current.clear();
+      messageChatIdRef.current = youtubeLiveChatId;
+    }
 
     async function startYouTubeGrpcChat(
       liveChatId: string
@@ -696,6 +705,7 @@ export function useYouTube({
               status.status
               ) {
                 case "connected":
+                  connectedAtRef.current = Date.now();
                   setYoutubeConnected(
                     true
                   );
@@ -717,7 +727,10 @@ export function useYouTube({
                   break;
 
                 case "stream_ended":
-                  endedChatIdsRef.current.add(liveChatId);
+                  const previous = endedChatIdsRef.current.get(liveChatId);
+                  const stable = connectedAtRef.current !== null && Date.now() - connectedAtRef.current >= 60000;
+                  const attempts = stable ? 1 : Math.min((previous?.attempts ?? 0) + 1, 5);
+                  endedChatIdsRef.current.set(liveChatId, { attempts, retryAt: Date.now() + youtubeRetryDelay(attempts) });
                   setYoutubeLiveChatId(null);
                   setYoutubeViewerLive(false);
                   setYoutubeViewerCount(null);
@@ -762,7 +775,7 @@ export function useYouTube({
                   break;
 
                 case "offline":
-                  endedChatIdsRef.current.add(liveChatId);
+                  endedChatIdsRef.current.set(liveChatId, { attempts: 5, retryAt: Infinity });
                   setYoutubeLiveChatId(null);
                   setYoutubeConnected(
                     false
