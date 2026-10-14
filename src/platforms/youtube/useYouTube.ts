@@ -60,6 +60,10 @@ export function useYouTube({
   ] =
     useState(false);
 
+  const endedChatIdsRef = useRef(new Set<string>());
+  const activeChatIdRef = useRef<string | null>(null);
+  activeChatIdRef.current = youtubeLiveChatId;
+
   const youtubeMessageIdsRef =
     useRef<Set<string>>(
       new Set()
@@ -149,7 +153,10 @@ export function useYouTube({
   useEffect(() => {
     let cancelled = false;
 
+    let discoveryRunning = false;
     async function autoConnectYouTube() {
+      if (discoveryRunning || activeChatIdRef.current) return;
+      discoveryRunning = true;
       try {
         setAutoConnectLoading(
           true
@@ -340,6 +347,10 @@ export function useYouTube({
           return;
         }
 
+        if (endedChatIdsRef.current.has(result.live_chat_id)) {
+          setYoutubeStatus("YouTube wacht op een nieuwe actieve livechat");
+          return;
+        }
         setYoutubeLiveChatId(
           result.live_chat_id
         );
@@ -426,6 +437,7 @@ export function useYouTube({
 
         await refreshAuthStatus();
       } finally {
+        discoveryRunning = false;
         if(!cancelled) {
           setAutoConnectLoading(
             false
@@ -435,8 +447,10 @@ export function useYouTube({
     }
 
     void autoConnectYouTube();
+    const discoveryTimer = window.setInterval(() => { void autoConnectYouTube(); }, 60000);
 
     return () => {
+      window.clearInterval(discoveryTimer);
       cancelled = true;
     };
   }, []);
@@ -703,12 +717,16 @@ export function useYouTube({
                   break;
 
                 case "stream_ended":
+                  endedChatIdsRef.current.add(liveChatId);
+                  setYoutubeLiveChatId(null);
+                  setYoutubeViewerLive(false);
+                  setYoutubeViewerCount(null);
                   setYoutubeConnected(
                     false
                   );
 
                   setYoutubeStatus(
-                    "YouTube livechat verbinding vernieuwen..."
+                    "YouTube wacht op een nieuwe actieve livechat"
                   );
 
                   recordConnectionState(
@@ -744,6 +762,8 @@ export function useYouTube({
                   break;
 
                 case "offline":
+                  endedChatIdsRef.current.add(liveChatId);
+                  setYoutubeLiveChatId(null);
                   setYoutubeConnected(
                     false
                   );
@@ -914,23 +934,7 @@ export function useYouTube({
           result
         );
 
-        setYoutubeConnected(
-          true
-        );
-
-        setYoutubeViewerLive(
-          true
-        );
-
-        setYoutubeStatus(
-          "YouTube verbonden"
-        );
-
-        recordConnectionState(
-          "youtube",
-          true,
-          "gRPC stream started"
-        );
+        // Start acceptance is not a connection; backend status is authoritative.
       } catch(error) {
         if(cancelled) {
           return;

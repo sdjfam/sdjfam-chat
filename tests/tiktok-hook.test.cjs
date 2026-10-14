@@ -2,11 +2,11 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
-function harness() {
+function harness(spawnError = null) {
   const command = new EventEmitter();
   command.stdout = new EventEmitter(); command.stderr = new EventEmitter();
   let resolveSpawn, killed = 0, spawnCount = 0, argumentsUsed;
-  command.spawn = () => { spawnCount++; return new Promise(resolve => { resolveSpawn = resolve; }); };
+  command.spawn = () => { spawnCount++; if (spawnCount === 1 && spawnError) return Promise.reject(spawnError); return new Promise(resolve => { resolveSpawn = resolve; }); };
   const effects = [], records = [], alerts = [], messages = [];
   const callbacks = [];
   function load(file) {
@@ -14,7 +14,7 @@ function harness() {
     const module = { exports: {} };
     function req(id) {
       if (id === 'react') return { useEffect: fn => effects.push(fn), useRef: v => ({ current: v }), useState: v => [v, () => {}] };
-      if (id === '@tauri-apps/plugin-shell') return { Command: { sidecar: (...args) => { argumentsUsed = args; return command; } } };
+      if (id === '@tauri-apps/plugin-shell') return { Command: { sidecar: (...args) => { argumentsUsed = args; return command; }, create: (...args) => { argumentsUsed = args; return command; } } };
       if (id.endsWith('/usePlatformLiveStats')) return { usePlatformLiveStats: () => ({ stats: {}, recordStats: e => records.push(e), disconnectStats: () => {} }) };
       if (id.endsWith('/diagnostics')) return new Proxy({}, { get: () => () => {} });
       if (id.startsWith('.')) return load(path.resolve(path.dirname(file), id + '.ts'));
@@ -87,4 +87,17 @@ test('active streak reaches event history but only final is eligible for Live St
   assert.deepEqual(h.alerts.map(e => e.metadata.repeat_count), [1, 2, 5, 10, 10]);
   assert.ok(h.alerts.every(e => e.id === 'stable-streak' && e.user.display_name === 'Piet'));
   assert.equal(h.messages.length, 0); h.cleanup();
+});
+
+test('missing installed primary helper uses the scoped resource once with working event listeners', async () => {
+ const h=harness('The system cannot find the file specified. (os error 2)');
+ await new Promise(resolve=>setImmediate(resolve));await h.ready();
+ assert.equal(h.spawnCount,2);assert.equal(h.argumentsUsed[0],'tiktok-helper-resource');
+ assert.equal(h.command.stdout.listenerCount('data'),1);
+ h.emit({type:'chat',platform:'tiktok',message:'fallback chat',username:'viewer'});
+ assert.equal(h.messages.length,1);h.cleanup();assert.equal(h.killed,1);
+});
+test('other spawn failures do not trigger fallback or an uncontrolled retry', async () => {
+ const h=harness('Access is denied. (os error 5)');
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(h.spawnCount,1);h.cleanup();
 });

@@ -1,6 +1,12 @@
 import { TikTokLiveConnection, WebcastEvent, ControlEvent } from "tiktok-live-connector";
 import { attachTikTokEvents } from "./sidecar/tiktok-events.mjs";
 
+// Offline packaging probe: import the bundled connector without contacting TikTok.
+if (process.argv[2] === "--self-test") {
+  console.log("TIKTOK_SIDECAR_READY");
+  process.exit(0);
+}
+
 const username = process.argv[2]?.replace(/^@/, "").trim();
 if (!username) {
   console.error("Gebruik: node tiktok-chat-helper.mjs <TikTok-gebruikersnaam>");

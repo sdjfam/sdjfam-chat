@@ -1418,12 +1418,12 @@ async fn run_youtube_chat_stream(
                                     "stream_ended"
                                         .to_string(),
                                 message:
-                                    "YouTube chatstream afgerond, verbinding wordt vernieuwd..."
+                                    "YouTube chatstream afgerond; wachten op livestream-detectie"
                                         .to_string(),
                             },
                         );
 
-                    break;
+                    return Ok(());
                 }
 
                 Err(status) => {

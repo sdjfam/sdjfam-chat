@@ -16,6 +16,11 @@
           "name": "binaries/tiktok-chat-helper",
           "sidecar": true,
           "args": true
+        },
+        {
+          "name": "tiktok-helper-resource",
+          "cmd": "$RESOURCE/helpers/tiktok-chat-helper.exe",
+          "args": true
         }
       ]
     },

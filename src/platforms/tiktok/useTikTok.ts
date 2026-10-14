@@ -40,7 +40,7 @@ export function useTikTok({
   useEffect(() => {
     let cancelled = false;
 
-    const command =
+    let command =
       Command.sidecar(
         "binaries/tiktok-chat-helper",
         [
@@ -48,6 +48,7 @@ export function useTikTok({
         ]
       );
 
+    function attachListeners(command: Command<string>) {
     // -----------------------------------------------------
     // STDOUT
     // -----------------------------------------------------
@@ -621,6 +622,9 @@ export function useTikTok({
       }
     );
 
+    }
+    attachListeners(command);
+
     // -----------------------------------------------------
     // SPAWN
     // -----------------------------------------------------
@@ -636,6 +640,16 @@ export function useTikTok({
 
     command
       .spawn()
+      .catch((error) => {
+        if (cancelled || !/os error 2|cannot find the file specified/i.test(String(error))) throw error;
+        command.stdout.removeAllListeners();
+        command.stderr.removeAllListeners();
+        command.removeAllListeners();
+        diagnosticLog("TIKTOK_SIDECAR", "Primary helper missing; starting packaged resource helper");
+        command = Command.create("tiktok-helper-resource", [TIKTOK_USERNAME]);
+        attachListeners(command);
+        return command.spawn();
+      })
       .then((child) => {
         if(cancelled) {
           void child

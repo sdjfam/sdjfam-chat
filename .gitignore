@@ -42,3 +42,5 @@ src/App-*.tsx
 
 # Downloaded YouTube API documentation used during development
 src-tauri/streaming-live-chat.html
+# Generated resource fallback for the compiled TikTok sidecar
+src-tauri/binaries/tiktok-chat-helper.exe

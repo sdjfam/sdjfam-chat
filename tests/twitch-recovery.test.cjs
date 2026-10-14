@@ -43,6 +43,7 @@ test('backend recovery updates status without spawning frontend retries', async 
   await flush();
   assert.deepEqual(h.statuses.slice(-4),['network_error','retry_scheduled','connecting','connected']);
   assert.equal(h.calls.filter(x=>x==='twitch_start_eventsub').length,1);
+  assert.equal(h.calls.filter(x=>x==='twitch_viewer_count').length,1);
   cleanup(); await flush(); assert.equal(h.unlistens(),1);
   assert.equal(h.calls.filter(x=>x==='twitch_stop_eventsub').length,1);
 });

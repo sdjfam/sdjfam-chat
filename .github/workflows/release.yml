@@ -52,6 +52,31 @@ jobs:
             throw "GitHub secret VITE_TWITCH_CLIENT_ID ontbreekt."
           }
 
+      - name: Regression and security gate
+        run: |
+          npm run build:sidecar
+          if ($LASTEXITCODE -ne 0) { throw "Sidecar build failed" }
+          node --test tests/*.cjs tests/*.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Release gate failed" }
+          npx tsc --noEmit
+          if ($LASTEXITCODE -ne 0) { throw "Release gate failed" }
+          cargo test --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "Release gate failed" }
+          cargo check --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "Release gate failed" }
+          npm audit --omit=dev --audit-level=high
+          if ($LASTEXITCODE -ne 0) { throw "Release gate failed" }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw "Release gate failed" }
+
+      - name: Build and inspect Windows installers
+        env:
+          VITE_TWITCH_CLIENT_ID: ${{ secrets.VITE_TWITCH_CLIENT_ID }}
+        run: |
+          npm run tauri -- build --bundles nsis,msi --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          if ($LASTEXITCODE -ne 0) { throw "Production build failed" }
+          powershell -ExecutionPolicy Bypass -File scripts/verify-windows-bundle.ps1
+
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -63,16 +88,13 @@ jobs:
           tagName: v__VERSION__
           releaseName: "SDJFAM Chat v__VERSION__"
           releaseBody: |
-            Nieuw in SDJFAM Chat v0.1.10:
+            Nieuw in SDJFAM Chat v0.1.11:
 
-            - TikTok JOIN: één actuele kijker, direct vervangen en na vijf seconden verborgen
-            - TikTok gifts: afzender, echte giftnaam en aantal in Alerts & Gifts
-            - Giftstreaks werken dezelfde regel bij zonder cumulatieve aantallen op te tellen
-            - Onafhankelijke verwerking van gelijktijdige senders en giftstreaks
-            - Gerichte TikTok JOIN- en giftdiagnostics voor de volgende livestream
-
-            Twitch Channel Points blijven uitsluitend in chat. De echte TikTok-livecontrole
-            volgt tijdens de volgende livestream; lokale tests en builds zijn geslaagd.
+            - TikTok helper wordt expliciet naast de app meegeleverd en offline gecontroleerd
+            - YouTube beëindigde chatstreams stoppen; discovery wacht op een nieuwe actieve livechat
+            - Twitch viewers worden direct na EventSub-herstel opnieuw opgehaald
+            - Token-recovery, Channel Points, chat en TikTok gifts blijven behouden
+            - Regressiontests, securitycheck en installercontrole vóór publicatie
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

@@ -275,6 +275,7 @@ export function useTwitch({
                 // Refresh only local status; this does not initiate token recovery.
                 if (["connected", "relink_required", "missing_scopes"].includes(payload.status)) {
                   void refreshTwitchAuthStatus();
+                  if (payload.status === "connected") void refreshTwitchViewerCount();
                 }
 
                 recordDiagnosticEvent(
