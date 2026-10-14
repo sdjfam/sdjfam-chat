@@ -80,19 +80,26 @@ async fn validate_twitch_token(http: &reqwest::Client, client_id: &str)
 // STATUS EVENTS
 // =========================================================
 
-fn emit_status(
-    app: &AppHandle,
-    status: &str,
-    message: impl Into<String>,
-) {
-    let _ =
-        app.emit(
-            "twitch-eventsub-status",
-            json!({
-                "status": status,
-                "message": message.into(),
-            }),
-        );
+// Serialize status updates and replay so a reloaded webview cannot retain a stale startup state.
+struct StatusSnapshot(std::sync::Mutex<Option<Value>>);
+impl StatusSnapshot {
+    const fn new() -> Self { Self(std::sync::Mutex::new(None)) }
+    fn publish(&self, value: Value, send: impl FnOnce(&Value)) {
+        let mut latest = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        *latest = Some(value);
+        send(latest.as_ref().unwrap());
+    }
+    fn replay(&self, send: impl FnOnce(&Value)) {
+        let latest = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(value) = latest.as_ref() { send(value); }
+    }
+}
+static EVENTSUB_STATUS: StatusSnapshot = StatusSnapshot::new();
+
+fn emit_status(app: &AppHandle, status: &str, message: impl Into<String>) {
+    EVENTSUB_STATUS.publish(json!({ "status": status, "message": message.into() }), |value| {
+        let _ = app.emit("twitch-eventsub-status", value);
+    });
 }
 
 // =========================================================
@@ -799,6 +806,7 @@ async fn wait_for_retry(delay: Option<Duration>, tokens: &mut tokio::sync::watch
 }
 
 async fn supervise_eventsub(app: AppHandle, client_id: String) {
+    emit_status(&app, "validating", "Twitch EventSub autorisatie controleren...");
     let http = match create_eventsub_http_client() {
         Ok(http) => http,
         Err(error) => { emit_status(&app, error.code(), error.to_string()); return; }
@@ -842,7 +850,10 @@ async fn supervise_eventsub(app: AppHandle, client_id: String) {
 pub async fn twitch_start_eventsub(app: AppHandle, client_id: String) -> Result<TwitchEventSubStartResult, String> {
     let client_id = client_id.trim().to_string();
     if client_id.is_empty() { return Err(AuthError::Configuration.into()); }
-    EVENTSUB_TASK.start(supervise_eventsub(app, client_id)).await;
+    let status_app = app.clone();
+    if !EVENTSUB_TASK.start(supervise_eventsub(app, client_id)).await {
+        EVENTSUB_STATUS.replay(|value| { let _ = status_app.emit("twitch-eventsub-status", value); });
+    }
     // Accepted is not connected; the status event is authoritative.
     Ok(TwitchEventSubStartResult { connected: false, broadcaster_login: String::new(), message: "Twitch EventSub start aangevraagd".to_string() })
 }
@@ -856,6 +867,15 @@ pub async fn twitch_stop_eventsub() -> Result<(), String> {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
+    #[test]
+    fn frontend_reload_replays_latest_status_without_regressing_to_connecting() {
+        let cache = StatusSnapshot::new();
+        cache.replay(|_| panic!("No status before worker starts"));
+        cache.publish(json!({"status":"connected"}), |_| {});
+        cache.replay(|value| assert_eq!(value["status"], "connected"));
+        cache.publish(json!({"status":"retry_scheduled"}), |_| {});
+        cache.replay(|value| assert_eq!(value["status"], "retry_scheduled"));
+    }
     use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
     #[tokio::test]
     async fn concurrent_starts_only_run_one_worker_and_stop_waits() {
